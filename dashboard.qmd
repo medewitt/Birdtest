@@ -5,7 +5,7 @@ format:
   dashboard:
     orientation: rows
     scrolling: false
-    theme: cosmo
+    theme: [cosmo, dashboard.scss]
 execute:
   echo: false
 ---
@@ -29,7 +29,7 @@ viewof win = Inputs.radio(new Map([["Daily", 1], ["7-day", 7], ["28-day", 28]]),
   label: "Trailing window", value: 7
 })
 viewof nTop = Inputs.range([5, Math.min(40, species.length)], {
-  label: "Species shown", step: 1, value: 15
+  label: "Species shown", step: 1, value: width < 600 ? 8 : 15
 })
 viewof norm = Inputs.radio(new Map([
   ["Share of all detections", "share"],
@@ -83,8 +83,9 @@ list(color = "light", value = fmt(sum(payload$daily$total)))
 // The selection lives in brushState so card resizes do not reset it.
 viewof range = {
   const strip = Plot.plot({
-    marginLeft: 60, marginRight: 150, marginTop: 4, marginBottom: 18,
-    x: { label: null, ticks: 8 }, y: { axis: null },
+    className: "bw-strip",
+    marginLeft: mLeft, marginRight: mRight, marginTop: 4, marginBottom: 18,
+    x: { label: null, ticks: narrow ? 4 : 8 }, y: { axis: null },
     marks: [Plot.areaY(dates.map((d, i) => ({ d, t: total[i] })), { x: "d", y: "t", fill: "#4a4a4a", fillOpacity: 0.5, curve: "step" })]
   });
   const x = strip.scale("x"), y = strip.scale("y");
@@ -112,13 +113,14 @@ viewof range = {
 ```{ojs}
 //| title: Rank over time
 highlight(Plot.plot({
-  marginLeft: 60, marginRight: 150,
-  x: { domain: xDomain, label: null },
+  className: "bw-chart",
+  marginLeft: mLeft, marginRight: mRight,
+  x: { domain: xDomain, label: null, ticks: narrow ? 4 : undefined },
   y: { domain: [nTop + 0.5, 0.5], label: `Rank (${winLabel} count, 1 = most detected)`, ticks: Math.min(nTop, 15) },
   marks: [
     Plot.line(rows, { x: "date", y: "rank", z: "sp", stroke: d => colorOf(d.sp), curve: "step", clip: true }),
     Plot.text(rows, Plot.selectLast({
-      x: "date", y: "rank", z: "sp", text: "sp", dx: 6, textAnchor: "start",
+      x: "date", y: "rank", z: "sp", text: "sp", ...endLabel,
       fill: d => colorOf(d.sp), filter: d => picked.includes(d.sp) && Number.isFinite(d.rank) && d.rank <= nTop
     })),
     Plot.tip(rows, Plot.pointer({
@@ -132,8 +134,9 @@ highlight(Plot.plot({
 ```{ojs}
 //| title: Normalized count over time
 highlight(Plot.plot({
-  marginLeft: 60, marginRight: 150,
-  x: { domain: xDomain, label: null },
+  className: "bw-chart",
+  marginLeft: mLeft, marginRight: mRight,
+  x: { domain: xDomain, label: null, ticks: narrow ? 4 : undefined },
   y: {
     type: logY ? "log" : "linear", grid: true, zero: !logY,
     label: norm === "share" ? `Share of all detections (%, ${winLabel})` : `Detections per active station-day (${winLabel})`
@@ -141,7 +144,7 @@ highlight(Plot.plot({
   marks: [
     Plot.line(rows, { x: "date", y: "value", z: "sp", stroke: d => colorOf(d.sp), filter: d => !logY || d.value > 0 }),
     Plot.text(rows, Plot.selectLast({
-      x: "date", y: "value", z: "sp", text: "sp", dx: 6, textAnchor: "start",
+      x: "date", y: "value", z: "sp", text: "sp", ...endLabel,
       fill: d => colorOf(d.sp), filter: d => picked.includes(d.sp) && Number.isFinite(d.value)
     })),
     Plot.tip(rows, Plot.pointer({
@@ -157,8 +160,9 @@ highlight(Plot.plot({
 ```{ojs}
 //| title: "Temperature: ERA5 daily mean with min-max band (blue), PUC sensor daily mean (orange points)"
 Plot.plot({
-  marginLeft: 60, marginRight: 150,
-  x: { domain: xDomain, label: null },
+  className: "bw-chart",
+  marginLeft: mLeft, marginRight: mRight,
+  x: { domain: xDomain, label: null, ticks: narrow ? 4 : undefined },
   y: { grid: true, label: `Air temperature (${units})` },
   marks: [
     Plot.areaY(tempRows, { x: "date", y1: "lo", y2: "hi", fill: "#0072B2", fillOpacity: 0.18, curve: "step" }),
@@ -182,6 +186,14 @@ meta = bw.meta
 nDays = meta.n_days
 dates = Array.from({ length: nDays }, (_, i) => new Date((meta.first_day + i) * 864e5))
 species = transpose(bw.species)
+// Phone layout: smaller margins, fewer ticks, end labels drawn inside the frame.
+narrow = width < 600
+mLeft = narrow ? 44 : 60
+mRight = narrow ? 12 : 150
+endLabel = narrow
+  ? { dx: -3, dy: -7, textAnchor: "end", stroke: "white", strokeWidth: 3, paintOrder: "stroke" }
+  : { dx: 6, textAnchor: "start" }
+
 // Okabe-Ito, reordered so the low-contrast yellow is used last.
 okabeIto = ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9", "#000000", "#F0E442"]
 
@@ -305,7 +317,7 @@ tempRows = {
 
 # Microclimate
 
-## {.sidebar}
+## {.toolbar}
 
 ```{ojs}
 viewof mHoursKey = Inputs.radio(["Night (00-05 local)", "Afternoon (12-17 local)", "All hours"], {
@@ -316,17 +328,11 @@ viewof mSeasonKey = Inputs.radio(["All", "Winter (DJF)", "Spring (MAM)", "Summer
 })
 ```
 
-Each PUC station is compared with ERA5-Land at its own coordinates, which Open-Meteo downscales to station elevation.
-Delta is PUC minus ERA5-Land, in °C (multiply by 1.8 for °F).
-Night hours are the cleaner microclimate signal.
-Afternoon deltas also include sun heating of the PUC enclosure.
-Intervals are 95% bootstrap intervals that resample whole sampled days (B = 1000, seed 1834).
-
 ```{ojs}
-micro ? html`<p><b>Summary for this selection.</b>
-SD of station mean deltas: ${d3.format(".2f")(spread.between)} °C across ${mStats.length} stations.
-Median daily between-station SD: PUC ${d3.format(".2f")(d3.median(spread.days, d => d.sdPuc))} °C,
-ERA5-Land ${d3.format(".2f")(d3.median(spread.days, d => d.sdEra))} °C.</p>` : html``
+micro ? html`<p class="small mb-0">Delta = PUC minus ERA5-Land at the station (°C); intervals resample whole days (B = 1000).
+SD of station deltas ${d3.format(".2f")(spread.between)} °C (${mStats.length} stations);
+median daily spread PUC ${d3.format(".2f")(d3.median(spread.days, d => d.sdPuc))} vs ERA5-Land ${d3.format(".2f")(d3.median(spread.days, d => d.sdEra))} °C.
+Night hours are the cleaner microclimate signal; see Methods.</p>` : html``
 ```
 
 ## Column
@@ -336,13 +342,16 @@ ERA5-Land ${d3.format(".2f")(d3.median(spread.days, d => d.sdEra))} °C.</p>` : 
 ```{ojs}
 //| title: "Mean delta by station (PUC minus ERA5-Land, °C)"
 micro ? Plot.plot({
+  className: "bw-chart",
   projection: { type: "mercator", domain: { type: "MultiPoint", coordinates: outline }, inset: 20 },
-  color: { type: "diverging", scheme: "PuOr", reverse: true, pivot: 0, domain: [-dMax, dMax], legend: true, label: "Mean delta (°C)" },
+  // Legends make the figure taller than its cell, which Quarto then grows to
+  // match on phones; label the dots with their values there instead.
+  color: { type: "diverging", scheme: "PuOr", reverse: true, pivot: 0, domain: [-dMax, dMax], legend: !narrow, label: "Mean delta (°C)" },
   marks: [
     Plot.line(outline, { x: d => d[0], y: d => d[1], stroke: "#777" }),
     Plot.dot(mStats, { x: "lon", y: "lat", r: 9, fill: "mean", stroke: "#222", tip: true,
       title: d => `${d.name}\nmean delta ${fmt1(d.mean)} °C [${fmt1(d.lo)}, ${fmt1(d.hi)}]\n${d.nDays} sampled days\nelevation ${d.elevation} m` }),
-    Plot.text(mStats, { x: "lon", y: "lat", text: "name", dy: -16, fontSize: 11 })
+    Plot.text(mStats, { x: "lon", y: "lat", text: narrow ? (d => fmt1(d.mean)) : "name", dy: -16, fontSize: 11 })
   ]
 }) : html`<p>No PUC stations with sensor data.</p>`
 ```
@@ -350,7 +359,8 @@ micro ? Plot.plot({
 ```{ojs}
 //| title: "Station delta with 95% day-block bootstrap interval"
 micro ? Plot.plot({
-  marginLeft: 140,
+  className: "bw-chart",
+  marginLeft: narrow ? 100 : 140,
   x: { label: "PUC minus ERA5-Land (°C)", grid: true },
   y: { label: null, domain: [...mStats].sort((a, b) => a.mean - b.mean).map(d => d.name) },
   marks: [
@@ -367,7 +377,8 @@ micro ? Plot.plot({
 ```{ojs}
 //| title: "Delta by local hour of day (selected season)"
 micro ? Plot.plot({
-  marginLeft: 50, marginRight: 110,
+  className: "bw-chart",
+  marginLeft: 50, marginRight: narrow ? 10 : 110,
   x: { label: "Local hour", domain: [0, 23], ticks: 12 },
   y: { label: "Mean delta (°C)", grid: true },
   marks: [
@@ -376,18 +387,19 @@ micro ? Plot.plot({
     Plot.line(diurnal, { x: "hour", y: "mean", z: "name", stroke: "#56B4E9", tip: true,
       title: d => `${d.name}\n${d.hour}:00  ${fmt1(d.mean)} °C` }),
     Plot.line(diurnal, Plot.groupX({ y: "median" }, { x: "hour", y: "mean", stroke: "#000", strokeWidth: 2.5 })),
-    Plot.text(diurnal, Plot.selectLast({ x: "hour", y: "mean", z: "name", text: "name", dx: 4, textAnchor: "start", fontSize: 10 }))
+    narrow ? null : Plot.text(diurnal, Plot.selectLast({ x: "hour", y: "mean", z: "name", text: "name", dx: 4, textAnchor: "start", fontSize: 10 }))
   ]
 }) : html``
 ```
 
 ```{ojs}
-//| title: "Spread across stations per sampled day: PUC vs ERA5-Land (SD, °C)"
+//| title: "Spread across stations per sampled day: PUC (orange) vs ERA5-Land (blue), SD in °C"
 micro ? Plot.plot({
+  className: "bw-chart",
   marginLeft: 50,
   x: { label: null, type: "utc" },
   y: { label: "Between-station SD (°C)", grid: true, zero: true },
-  color: { legend: true, domain: ["PUC", "ERA5-Land"], range: ["#D55E00", "#0072B2"] },
+  color: { legend: !narrow, domain: ["PUC", "ERA5-Land"], range: ["#D55E00", "#0072B2"] },
   marks: [
     Plot.dot(spread.days, { x: "date", y: "sdPuc", fill: "#D55E00", r: 2, tip: true,
       title: d => `${d.date.toISOString().slice(0, 10)}\nPUC SD ${fmt1(d.sdPuc)}\nERA5-Land SD ${fmt1(d.sdEra)}\n${d.n} stations` }),
