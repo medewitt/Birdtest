@@ -559,6 +559,75 @@ spread = {
 }
 ```
 
+# Local ecology
+
+## Row
+
+### Column {width="68%"}
+
+```{r}
+#| title: "Top 15 species: residency and local seasonality"
+refs <- c(
+  "10.1676/13-038.1"         = "McClure CJW, Rolek BW, Hill GE (2013). Seasonal use of habitat by shrub-breeding birds in a southeastern national forest. <i>Wilson Journal of Ornithology</i> 125(4):731-743.",
+  "10.3389/fevo.2021.691808" = "Cornelius JM, Hahn TP, Robart AR, et al. (2021). Seasonal patterns of fat deposits in relation to migratory strategy in facultative migrants. <i>Frontiers in Ecology and Evolution</i> 9:691808.",
+  "10.1515/ami-2016-0004"    = "Brown D, Miller GL (2016). Band recoveries reveal alternative migration strategies in American Robins. <i>Animal Migration</i> 3(1):35-47.",
+  "10.2307/4084660"          = "Kuenzel WJ, Helms CW (1974). An annual cycle study of tan-striped and white-striped White-throated Sparrows. <i>The Auk</i> 91(1):44-53.",
+  "10.1642/auk-18-23.1"      = "Townsend AK, Frett B, McGarvey A, et al. (2018). Where do winter crows go? Characterizing partial migration of American Crows with satellite telemetry, stable isotopes, and molecular markers. <i>The Auk</i> 135(4):964-974.",
+  "10.1002/ecs2.4316"        = "Sonnleitner J, LaZerte S, McKellar AE, et al. (2022). Rapid shifts in migration routes and breeding latitude in North American bluebirds. <i>Ecosphere</i> 13(12):e4316."
+)
+eco <- build_ecology(read_cache())
+ref_no <- setNames(seq_along(refs), names(refs))
+wiki <- function(x) paste0("https://en.wikipedia.org/wiki/", utils::URLencode(gsub(" ", "_", x)))
+src <- ifelse(eco$source %in% names(refs),
+  sprintf('<a href="https://doi.org/%s" target="_blank" rel="noopener">[%d]</a>', eco$source, ref_no[eco$source]),
+  "general range knowledge")
+mosquito <- sprintf(
+  '<img src="%s" class="bw-wnv" alt="West Nile virus detected" title="West Nile virus has been detected in dead birds of this species (CDC, US, 1999-2016)">',
+  knitr::image_uri("assets/mosquito.png"))
+tab <- data.frame(
+  `#` = eco$rank,
+  Species = sprintf('<a href="%s" target="_blank">%s</a>%s', wiki(eco$common_name), eco$common_name,
+                    ifelse(eco$wnv, paste0(" ", mosquito), "")),
+  `Scientific name` = sprintf("<i>%s</i>", eco$scientific_name),
+  Detections = format(eco$detections, big.mark = ","),
+  Status = sprintf("<b>%s</b>", eco$status),
+  `Seasonality (Jan-Dec)` = sprintf('<span class="bw-spark" title="Share of all detections by calendar month, scaled to the peak month">%s</span>', eco$seasonality),
+  Note = eco$note,
+  Source = src,
+  check.names = FALSE
+)
+htmltools::div(class = "bw-table-wrap",
+  htmltools::HTML(knitr::kable(tab, format = "html", escape = FALSE,
+                               table.attr = 'class="table table-sm bw-eco"')))
+```
+
+### Column {width="32%"}
+
+::: {.card title="How to read this table"}
+**Status** is the usual pattern for the North Carolina Piedmont.
+*Resident*: present year-round and essentially non-migratory.
+*Migratory*: present only seasonally.
+*Both*: present year-round, with migrants from farther north joining or replacing local birds in winter.
+
+**Seasonality** is computed from the BirdWeather detections.
+Each bar is the species' share of all detections in that calendar month, pooled over years and scaled to its peak month, so months with more stations online do not look busier.
+Bars reflect vocal activity as well as presence: many residents sing less in late summer, and BirdNET misidentifications add low-level noise.
+
+**West Nile virus.** The mosquito icon marks species on the CDC list of dead-bird species in which West Nile virus has been detected in the United States, 1999-2016 (CDC, 2017; 332 species, kept as `data/wnv_bird_species_cdc_1999_2016.csv`).
+It means the species has tested positive somewhere in the US, not that it is a major reservoir or that local birds are infected.
+`r sum(eco$wnv)` of the top `r nrow(eco)` species are on the list.
+
+**Sources.** Numbered sources are peer-reviewed papers that describe the species' migratory behavior, each linked by DOI.
+None of the six is indexed in PubMed, so no PMID links are given.
+Status for species marked "general range knowledge" follows standard range accounts and was not checked against a specific paper.
+Wikipedia links go to each species' article.
+
+```{r}
+#| output: asis
+cat(sprintf('%d. %s <a href="https://doi.org/%s" target="_blank" rel="noopener">doi:%s</a>', seq_along(refs), refs, names(refs), names(refs)), sep = "\n")
+```
+:::
+
 # Methods
 
 ## Row
