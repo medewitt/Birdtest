@@ -34,7 +34,7 @@ A raw detection row from `get_detections()` has 21 mostly-string columns, and pu
 Files are zstd-compressed Parquet written with `nanoparquet`, which has no compiled dependencies beyond its own sources.
 Counts are partitioned by year in `data/cache/counts/<year>.parquet`.
 In testing, 1.1 million count rows took 1.1 MB on disk.
-PUC sensor readings (about one every 42 s) are pulled on a stratified random subsample of days, 4 UTC days per calendar month by default (`BW_PUC_DAYS_PER_MONTH`, `Inf` for all days).
+PUC sensor readings (about one every 42 s) are pulled on a stratified random subsample of days, 4 local calendar days per month by default (`BW_PUC_DAYS_PER_MONTH`, `Inf` for all days).
 The sample is seeded from (1834, year, month), so it is stable across runs and shared by all stations.
 Each sampled day is pulled in full and reduced to hourly means before writing; raw readings are never stored.
 ERA5-Land hourly temperature at each PUC station's coordinates comes from the Open-Meteo archive for the same hours.

@@ -120,7 +120,7 @@ build_micro <- function(cache) {
   h[, `:=`(
     hour  = lt$hour,
     month = lt$mon + 1L,
-    day   = as.integer(as.Date(time, tz = "UTC"))  # sampled unit, used as bootstrap block
+    day   = as.integer(as.Date(time, tz = TZ_LOCAL))  # sampled unit, used as bootstrap block
   )]
   st <- cache$stations[station_id %in% h$station_id,
                        .(station_id, station_name, station_lat, station_lon)]
