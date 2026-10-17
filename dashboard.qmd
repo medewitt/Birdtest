@@ -581,9 +581,13 @@ wiki <- function(x) paste0("https://en.wikipedia.org/wiki/", utils::URLencode(gs
 src <- ifelse(eco$source %in% names(refs),
   sprintf('<a href="https://doi.org/%s">[%d]</a>', eco$source, ref_no[eco$source]),
   "general range knowledge")
+mosquito <- sprintf(
+  '<img src="%s" class="bw-wnv" alt="West Nile virus detected" title="West Nile virus has been detected in dead birds of this species (CDC, US, 1999-2016)">',
+  knitr::image_uri("assets/mosquito.png"))
 tab <- data.frame(
   `#` = eco$rank,
-  Species = sprintf('<a href="%s" target="_blank">%s</a>', wiki(eco$common_name), eco$common_name),
+  Species = sprintf('<a href="%s" target="_blank">%s</a>%s', wiki(eco$common_name), eco$common_name,
+                    ifelse(eco$wnv, paste0(" ", mosquito), "")),
   `Scientific name` = sprintf("<i>%s</i>", eco$scientific_name),
   Detections = format(eco$detections, big.mark = ","),
   Status = sprintf("<b>%s</b>", eco$status),
@@ -608,6 +612,10 @@ htmltools::div(class = "bw-table-wrap",
 **Seasonality** is computed from the BirdWeather detections.
 Each bar is the species' share of all detections in that calendar month, pooled over years and scaled to its peak month, so months with more stations online do not look busier.
 Bars reflect vocal activity as well as presence: many residents sing less in late summer, and BirdNET misidentifications add low-level noise.
+
+**West Nile virus.** The mosquito icon marks species on the CDC list of dead-bird species in which West Nile virus has been detected in the United States, 1999-2016 (CDC, 2017; 332 species, kept as `data/wnv_bird_species_cdc_1999_2016.csv`).
+It means the species has tested positive somewhere in the US, not that it is a major reservoir or that local birds are infected.
+`r sum(eco$wnv)` of the top `r nrow(eco)` species are on the list.
 
 **Sources.** Numbered sources are peer-reviewed papers found with Consensus that describe the species' migratory behavior.
 Status for species marked "general range knowledge" follows standard range accounts and was not checked against a specific paper.

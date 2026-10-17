@@ -13,6 +13,8 @@ It shows species rank over time, normalized detection counts, and daily temperat
 | `scripts/update_cache.R` | Refreshes the cache |
 | `dashboard.qmd` | Dashboard (Observable Plot via Quarto OJS) |
 | `data/species_status.csv` | Curated residency status, note, and source DOI for the Local ecology table |
+| `data/wnv_bird_species_cdc_1999_2016.csv` | CDC list of dead-bird species with West Nile virus detected, US 1999-2016 (332 species) |
+| `assets/mosquito.png` | Icon marking WNV-listed species in the Local ecology table |
 | `data/cache/` | Parquet cache |
 
 ## Run
@@ -65,4 +67,5 @@ The manual dispatch has a `full_refresh` option that discards the cache and pull
 One-time setup: in the repository settings, set Pages to deploy from GitHub Actions, and make sure Actions has read and write permission for contents.
 
 The Local ecology page lists the top 15 species with Wikipedia links, residency status for the NC Piedmont (Resident, Migratory, or Both) from `data/species_status.csv`, and an effort-normalized monthly seasonality profile computed from the detections.
+A mosquito icon marks species on the CDC list of dead-bird species in which West Nile virus has been detected (US, 1999-2016), matched by common name.
 Species that enter the top 15 without a row in the CSV show as "Not classified" until a row is added.
