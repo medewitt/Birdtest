@@ -49,3 +49,16 @@ Normalized count is either the share of all detections or detections per active 
 Temperature is ERA5 daily mean, min, and max at the county centroid (Open-Meteo), with BirdWeather PUC on-board sensor daily means overlaid.
 The Microclimate page compares each PUC station with ERA5-Land at its own location, with day-block bootstrap intervals, the delta by hour of day, and between-station spread compared with ERA5-Land spread.
 Detections measure vocal activity weighted by detectability, not abundance.
+
+## Automation
+
+`.github/workflows/dashboard.yml` runs daily at 10:17 UTC and on manual dispatch.
+It updates the cache, renders the dashboard, and deploys it to GitHub Pages.
+Pushes to `main` and pull requests only render from the stored cache and make no API calls.
+
+The cache is kept on an orphan `cache` branch, checked out as a worktree at `data/cache/`.
+Each update force-pushes a single parentless commit, so the Parquet files never accumulate in git history.
+To work with it locally, run `git worktree add data/cache cache`.
+The manual dispatch has a `full_refresh` option that discards the cache and pulls full history.
+
+One-time setup: in the repository settings, set Pages to deploy from GitHub Actions, and make sure Actions has read and write permission for contents.
