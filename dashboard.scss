@@ -23,6 +23,8 @@ $light: $ideeep-surface;
 $navbar-bg: $ideeep-nav-bg;
 $navbar-fg: #ffffff;
 $navbar-hl: $ideeep-accent;
+// Nunito Sans is self-hosted (assets/head.html); skip cosmo's Google Fonts import.
+$web-font-path: false;
 
 /*-- scss:rules --*/
 

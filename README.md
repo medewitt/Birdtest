@@ -11,6 +11,7 @@ It shows species rank over time, normalized detection counts, and daily temperat
 | `R/cache.R` | API pulls and incremental Parquet cache |
 | `R/prepare.R` | Builds the compact browser payload (ranks, daily totals, temperature) |
 | `scripts/update_cache.R` | Refreshes the cache |
+| `scripts/seasonal.py` | Fits each shipped species' annual seasonal component (harmonic regression, block bootstrap) to `data/cache/seasonal.parquet` |
 | `dashboard.qmd` | Dashboard (Observable Plot via Quarto OJS) |
 | `data/species_status.csv` | Curated residency status, note, and source DOI for the Local ecology table |
 | `data/wnv_bird_species_cdc_1999_2016.csv` | CDC list of dead-bird species with West Nile virus detected, US 1999-2016 (332 species) |
@@ -25,10 +26,11 @@ It shows species rank over time, normalized detection counts, and daily temperat
 ```bash
 Rscript scripts/update_cache.R   # first run pulls full history; later runs fetch the last 7 days
 uv sync                          # installs the pinned Quarto CLI (quarto-cli on PyPI)
+uv run python scripts/seasonal.py       # seasonal component per species (about 15 s)
 uv run quarto render dashboard.qmd
 ```
 
-Quarto is pinned in `pyproject.toml` / `uv.lock` and run through uv.
+Quarto and the Python dependencies (numpy, pyarrow) are pinned in `pyproject.toml` / `uv.lock` and run through uv.
 Required R packages: `birdweatheR` (GitHub, `BrentPease1/birdweatheR`), `data.table`, `nanoparquet`, `jsonlite`, `maps`, `ggplot2`, `knitr`, `rmarkdown`.
 The dashboard loads Observable Plot and d3 from cdn.jsdelivr.net at view time, as all Quarto OJS pages do.
 
