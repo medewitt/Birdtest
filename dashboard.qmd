@@ -146,7 +146,7 @@ highlight(Plot.plot({
     })),
     Plot.tip(rows, Plot.pointer({
       x: "date", y: "value", filter: d => Number.isFinite(d.value) && (!logY || d.value > 0),
-      title: d => `${d.sp}\n${d.date.toISOString().slice(0, 10)}\n${d3.format(".3~g")(d.value)}${norm === "share" ? "%" : " per station-day"}\nrank ${Number.isFinite(d.rank) ? d.rank : ">" + species.length}`
+      title: d => `${d.sp}\n${d.date.toISOString().slice(0, 10)}\n${d3.format(".3~g")(d.value)}${norm === "share" ? "%" : " per station-day"}\nrank ${Number.isFinite(d.rank) ? d.rank : "none (0 detections)"}`
     }))
   ]
 }))
