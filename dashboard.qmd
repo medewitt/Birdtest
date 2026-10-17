@@ -44,8 +44,8 @@ viewof units = Inputs.radio(["°C", "°F"], { label: "Temperature", value: "°C"
 ```
 
 Drag on the strip above the charts to zoom the date range.
-Double-click it to reset.
-Hover any line for values.
+Click or tap the strip outside the selection to reset.
+Hover over or tap a line for values.
 
 ## Column
 
