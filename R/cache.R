@@ -8,7 +8,7 @@
 #   weather_era5.parquet       date, tmin, tmean, tmax (deg C), rhmin, rhmean, rhmax (%), Open-Meteo ERA5
 #   puc_hourly.parquet         station_id, time (UTC hour), temp, humidity, n
 #   puc_days_done.parquet      station_id, date (sampled local days fetched), version
-#   era5_hourly.parquet        station_id, time, era5 (deg C, ERA5-Land), elevation
+#   era5_hourly.parquet        station_id, time, era5, era5_td (deg C), era5_rh (%), elevation; ERA5-Land
 #
 # Detections are cached as server-side daily species counts, not raw rows.
 # A raw detection is ~21 columns of strings; a daily count is 4 integers.
@@ -291,7 +291,8 @@ update_puc_hourly <- function(stations, counts = NULL, days = puc_sample_days())
 }
 
 # ---------------------------------------------------------------------------
-# ERA5-Land hourly 2 m temperature at each PUC station's coordinates.
+# ERA5-Land hourly 2 m temperature, relative humidity, and dew point at each
+# PUC station's coordinates.
 # Open-Meteo downscales to the point using a 90 m DEM, so the reference is
 # already corrected to station elevation (returned as `elevation`).
 # ---------------------------------------------------------------------------
@@ -302,7 +303,8 @@ update_era5_hourly <- function(stations, puc_hourly) {
   res <- lapply(seq_len(nrow(st)), function(i) {
     url <- sprintf(paste0(
       "https://archive-api.open-meteo.com/v1/archive?latitude=%.5f&longitude=%.5f",
-      "&start_date=%s&end_date=%s&hourly=temperature_2m&models=era5_land&timezone=GMT"
+      "&start_date=%s&end_date=%s&models=era5_land&timezone=GMT",
+      "&hourly=temperature_2m,relative_humidity_2m,dew_point_2m"
     ), st$station_lat[i], st$station_lon[i], st$from[i], st$to[i])
     j <- with_retry(function() jsonlite::fromJSON(url))
     Sys.sleep(0.5)
@@ -310,6 +312,8 @@ update_era5_hourly <- function(stations, puc_hourly) {
       station_id = st$station_id[i],
       time       = as.POSIXct(j$hourly$time, format = "%Y-%m-%dT%H:%M", tz = "UTC"),
       era5       = j$hourly$temperature_2m,
+      era5_rh    = j$hourly$relative_humidity_2m,
+      era5_td    = j$hourly$dew_point_2m,
       elevation  = j$elevation
     )
   })
