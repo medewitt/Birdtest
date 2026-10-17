@@ -116,6 +116,12 @@ build_payload <- function(cache = read_cache()) {
 # coefficients), adequate for -40 to 50 deg C.
 svp <- function(t) 6.1094 * exp(17.625 * t / (t + 243.04))
 
+# Dew point (deg C) from air temperature (deg C) and RH (%), inverse Magnus.
+dew_point <- function(t, rh) {
+  g <- log(rh / 100) + 17.625 * t / (t + 243.04)
+  243.04 * g / (17.625 - g)
+}
+
 # Local-day PUC means, kept only for days with >= 20 of 24 hours observed.
 # rh is the sensor reading. rh_adj re-expresses the same vapor pressure at the
 # ERA5-Land air temperature for that station-hour: the enclosure warms the air
@@ -139,11 +145,17 @@ puc_daily <- function(puc, era5_h = NULL) {
 }
 
 # Microclimate payload: hourly PUC vs ERA5-Land at each PUC station.
-# Temperatures are shipped as integer tenths of a degree C.
+# Temperature and dew point ship as integer tenths of a degree C, RH as
+# integer tenths of a percent.
 build_micro <- function(cache) {
   if (is.null(cache$era5_h) || !nrow(cache$era5_h)) return(NULL)
   h <- cache$era5_h[cache$puc, on = .(station_id, time), nomatch = NULL]
   h <- h[n >= 30L & !is.na(era5)]  # >= ~20 min of readings in the hour
+  for (v in c("era5_rh", "era5_td")) if (!v %in% names(h)) h[, (v) := NA_real_]
+  # Humidity: dew point is unchanged by the warm enclosure, so it compares
+  # directly; RH is re-expressed at the ERA5-Land air temperature (see puc_daily).
+  h[, rh := fifelse(humidity > 0 & humidity <= 100, humidity, NA_real_)]
+  h[, `:=`(puc_td = dew_point(temp, rh), puc_rha = pmin(100, rh * svp(temp) / svp(era5)))]
   lt <- as.POSIXlt(h$time, tz = TZ_LOCAL)
   h[, `:=`(
     hour  = lt$hour,
@@ -168,7 +180,11 @@ build_micro <- function(cache) {
       hour  = h$hour,
       month = h$month,
       puc   = as.integer(round(10 * h$temp)),
-      era5  = as.integer(round(10 * h$era5))
+      era5  = as.integer(round(10 * h$era5)),
+      puc_td  = as.integer(round(10 * h$puc_td)),
+      era5_td = as.integer(round(10 * h$era5_td)),
+      puc_rh  = as.integer(round(10 * h$puc_rha)),
+      era5_rh = as.integer(round(10 * h$era5_rh))
     ),
     outline = list(lon = round(poly$lon, 4), lat = round(poly$lat, 4))
   )

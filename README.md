@@ -47,7 +47,7 @@ See the Methods page of the dashboard.
 In short, rank is the county-wide competition rank of the trailing-window detection sum.
 Normalized count is either the share of all detections or detections per active station-day.
 Temperature and relative humidity are ERA5 daily mean, min, and max at the county centroid (Open-Meteo), with BirdWeather PUC on-board sensor daily means overlaid; PUC humidity is also shown re-expressed at outdoor (ERA5-Land) temperature, since the warm enclosure makes the sensor read dry.
-The Microclimate page compares each PUC station with ERA5-Land at its own location, with day-block bootstrap intervals, the delta by hour of day, and between-station spread compared with ERA5-Land spread.
+The Microclimate page compares each PUC station with ERA5-Land at its own location for air temperature, dew point, or relative humidity, with day-block bootstrap intervals, the delta by hour of day, and between-station spread compared with ERA5-Land spread.
 Detections measure vocal activity weighted by detectability, not abundance.
 
 ## Automation
