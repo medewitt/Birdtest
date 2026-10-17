@@ -207,7 +207,8 @@ fetch_env_day <- function(sid, d) {
         }
       }
     }'
-  exec <- ghql::Query$new()$query("env", q)
+  # birdweatheR:::fetch_page_with_retry() executes query_exec$url_link.
+  exec <- ghql::Query$new()$query("url_link", q)
   vars <- list(id = as.character(sid), first = 250L,
                period = list(from = paste0(d, "T00:00:00.000Z"), to = paste0(d, "T23:59:59.000Z")))
   pages <- list()
