@@ -25,7 +25,8 @@ read_cache <- function() {
     stations = rp(file.path(CACHE_DIR, "stations.parquet")),
     weather  = rp(file.path(CACHE_DIR, "weather_era5.parquet")),
     puc      = rp(file.path(CACHE_DIR, "puc_hourly.parquet")),
-    era5_h   = rp(file.path(CACHE_DIR, "era5_hourly.parquet"))
+    era5_h   = rp(file.path(CACHE_DIR, "era5_hourly.parquet")),
+    seasonal = rp(file.path(CACHE_DIR, "seasonal.parquet"))  # scripts/seasonal.py
   )
 }
 
@@ -108,8 +109,27 @@ build_payload <- function(cache = read_cache()) {
       puc_rh     = round(weather$puc_rh),
       puc_rh_adj = round(weather$puc_rh_adj)
     ),
-    micro = build_micro(cache)
+    micro = build_micro(cache),
+    seasonal = build_seasonal(cache$seasonal, top)
   )
+}
+
+# Annual seasonal component from scripts/seasonal.py, for the shipped species.
+# Columnar like `series`: species-major, one row per (species, grid day), with
+# NA for species the script did not fit.
+build_seasonal <- function(seas, top) {
+  if (is.null(seas) || !nrow(seas)) return(NULL)
+  seas <- copy(seas)[, norm := as.character(norm)]
+  doy <- sort(unique(seas$doy))
+  out <- list(doy = doy)
+  for (nm in c("share", "per_station")) {
+    g <- CJ(idx = top$idx, doy = doy)
+    g[top, on = "idx", species_id := i.species_id]
+    g <- seas[norm == nm][g, on = .(species_id, doy)]
+    setorder(g, idx, doy)
+    out[[nm]] <- list(est = round(g$est, 3), lo = round(g$lo, 3), hi = round(g$hi, 3))
+  }
+  out
 }
 
 # Saturation vapor pressure over water (hPa), Magnus form (Alduchov & Eskridge
