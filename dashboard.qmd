@@ -366,6 +366,9 @@ tempRows = {
 ## {.toolbar}
 
 ```{ojs}
+viewof mVarKey = Inputs.radio(["Temperature", "Dew point", "Relative humidity"], {
+  label: "Variable", value: "Temperature"
+})
 viewof mHoursKey = Inputs.radio(["Night (00-05 local)", "Afternoon (12-17 local)", "All hours"], {
   label: "Hours", value: "Night (00-05 local)"
 })
@@ -375,10 +378,10 @@ viewof mSeasonKey = Inputs.radio(["All", "Winter (DJF)", "Spring (MAM)", "Summer
 ```
 
 ```{ojs}
-micro ? html`<p class="small mb-0">Delta = PUC minus ERA5-Land at the station (°C); intervals resample whole days (B = 1000).
-SD of station deltas ${d3.format(".2f")(spread.between)} °C (${mStats.length} stations);
-median daily spread PUC ${d3.format(".2f")(d3.median(spread.days, d => d.sdPuc))} vs ERA5-Land ${d3.format(".2f")(d3.median(spread.days, d => d.sdEra))} °C.
-Night hours are the cleaner microclimate signal; see Methods.</p>` : html``
+micro && mStats.length ? html`<p class="small mb-0">Delta = PUC minus ERA5-Land ${mVar.what} at the station (${mVar.unit}); intervals resample whole days (B = 1000).
+SD of station deltas ${d3.format(".2f")(spread.between)} ${mVar.unit} (${mStats.length} stations);
+median daily spread PUC ${d3.format(".2f")(d3.median(spread.days, d => d.sdPuc))} vs ERA5-Land ${d3.format(".2f")(d3.median(spread.days, d => d.sdEra))} ${mVar.unit}.
+${mVar.note}</p>` : html`<p class="small mb-0">${mNoData}</p>`
 ```
 
 ## Column
@@ -386,34 +389,34 @@ Night hours are the cleaner microclimate signal; see Methods.</p>` : html``
 ### Row {height="55%"}
 
 ```{ojs}
-//| title: "Mean delta by station (PUC minus ERA5-Land, °C)"
-micro ? Plot.plot({
+//| title: "Mean delta by station (PUC minus ERA5-Land)"
+mReady ? Plot.plot({
   className: "bw-chart",
   projection: { type: "mercator", domain: { type: "MultiPoint", coordinates: outline }, inset: 20 },
   // Legends make the figure taller than its cell, which Quarto then grows to
   // match on phones; label the dots with their values there instead.
-  color: { type: "diverging", scheme: "PuOr", reverse: true, pivot: 0, domain: [-dMax, dMax], legend: !narrow, label: "Mean delta (°C)" },
+  color: { type: "diverging", scheme: "PuOr", reverse: true, pivot: 0, domain: [-dMax, dMax], legend: !narrow, label: `Mean delta (${mVar.unit})` },
   marks: [
     Plot.line(outline, { x: d => d[0], y: d => d[1], stroke: "#777" }),
     Plot.dot(mStats, { x: "lon", y: "lat", r: 9, fill: "mean", stroke: "#222", tip: true,
-      title: d => `${d.name}\nmean delta ${fmt1(d.mean)} °C [${fmt1(d.lo)}, ${fmt1(d.hi)}]\n${d.nDays} sampled days\nelevation ${d.elevation} m` }),
+      title: d => `${d.name}\nmean delta ${fmt1(d.mean)} ${mVar.unit} [${fmt1(d.lo)}, ${fmt1(d.hi)}]\n${d.nDays} sampled days\nelevation ${d.elevation} m` }),
     Plot.text(mStats, { x: "lon", y: "lat", text: narrow ? (d => fmt1(d.mean)) : "name", dy: -16, fontSize: 11 })
   ]
-}) : html`<p>No PUC stations with sensor data.</p>`
+}) : html`<p>${mNoData}</p>`
 ```
 
 ```{ojs}
 //| title: "Station delta with 95% day-block bootstrap interval"
-micro ? Plot.plot({
+mReady ? Plot.plot({
   className: "bw-chart",
   marginLeft: narrow ? 100 : 140,
-  x: { label: "PUC minus ERA5-Land (°C)", grid: true },
+  x: { label: `PUC minus ERA5-Land ${mVar.what} (${mVar.unit})`, grid: true },
   y: { label: null, domain: [...mStats].sort((a, b) => a.mean - b.mean).map(d => d.name) },
   marks: [
     Plot.ruleX([0], { stroke: "#999" }),
     Plot.ruleY(mStats, { y: "name", x1: "lo", x2: "hi", stroke: "#0072B2", strokeWidth: 2 }),
     Plot.dot(mStats, { y: "name", x: "mean", fill: "#0072B2", r: 4, tip: true,
-      title: d => `${d.name}\n${fmt1(d.mean)} °C [${fmt1(d.lo)}, ${fmt1(d.hi)}]\n${d.nDays} days` })
+      title: d => `${d.name}\n${fmt1(d.mean)} ${mVar.unit} [${fmt1(d.lo)}, ${fmt1(d.hi)}]\n${d.nDays} days` })
   ]
 }) : html``
 ```
@@ -422,16 +425,16 @@ micro ? Plot.plot({
 
 ```{ojs}
 //| title: "Delta by local hour of day (selected season)"
-micro ? Plot.plot({
+mReady ? Plot.plot({
   className: "bw-chart",
   marginLeft: 50, marginRight: narrow ? 10 : 110,
   x: { label: "Local hour", domain: [0, 23], ticks: 12 },
-  y: { label: "Mean delta (°C)", grid: true },
+  y: { label: `Mean delta (${mVar.unit})`, grid: true },
   marks: [
     Plot.rect([mHours], { x1: d => d[0] - 0.5, x2: d => d[1] + 0.5, fill: "#000", fillOpacity: 0.06 }),
     Plot.ruleY([0], { stroke: "#999" }),
     Plot.line(diurnal, { x: "hour", y: "mean", z: "name", stroke: "#56B4E9", tip: true,
-      title: d => `${d.name}\n${d.hour}:00  ${fmt1(d.mean)} °C` }),
+      title: d => `${d.name}\n${d.hour}:00  ${fmt1(d.mean)} ${mVar.unit}` }),
     Plot.line(diurnal, Plot.groupX({ y: "median" }, { x: "hour", y: "mean", stroke: "#000", strokeWidth: 2.5 })),
     narrow ? null : Plot.text(diurnal, Plot.selectLast({ x: "hour", y: "mean", z: "name", text: "name", dx: 4, textAnchor: "start", fontSize: 10 }))
   ]
@@ -439,19 +442,19 @@ micro ? Plot.plot({
 ```
 
 ```{ojs}
-//| title: "Spread across stations per sampled day: PUC (orange) vs ERA5-Land (blue), SD in °C"
-micro ? Plot.plot({
+//| title: "Spread across stations per sampled day: PUC (orange) vs ERA5-Land (blue)"
+mReady ? Plot.plot({
   className: "bw-chart",
   marginLeft: 50,
   x: { label: null, type: "utc" },
-  y: { label: "Between-station SD (°C)", grid: true, zero: true },
+  y: { label: `Between-station SD (${mVar.unit})`, grid: true, zero: true },
   color: { legend: !narrow, domain: ["PUC", "ERA5-Land"], range: ["#D55E00", "#0072B2"] },
   marks: [
     Plot.dot(spread.days, { x: "date", y: "sdPuc", fill: "#D55E00", r: 2, tip: true,
       title: d => `${d.date.toISOString().slice(0, 10)}\nPUC SD ${fmt1(d.sdPuc)}\nERA5-Land SD ${fmt1(d.sdEra)}\n${d.n} stations` }),
     Plot.dot(spread.days, { x: "date", y: "sdEra", fill: "#0072B2", r: 2 })
   ]
-}) : html`<p>Needs at least 3 PUC stations.</p>`
+}) : html`<p>${mNoData}</p>`
 ```
 
 ```{ojs}
@@ -473,17 +476,35 @@ mSeason = {
   return m[mSeasonKey];
 }
 
+// Per-variable columns (integer tenths in the payload) and labels.
+mVar = {
+  const v = {
+    "Temperature": { puc: "puc", era: "era5", unit: "°C", what: "air temperature",
+      note: "Night hours are the cleaner microclimate signal; afternoon deltas include enclosure heating." },
+    "Dew point": { puc: "puc_td", era: "era5_td", unit: "°C", what: "dew point",
+      note: "Dew point measures water content, which enclosure heating does not change." },
+    "Relative humidity": { puc: "puc_rh", era: "era5_rh", unit: "%", what: "relative humidity",
+      note: "PUC RH is re-expressed at the ERA5-Land air temperature; see Methods." }
+  };
+  return v[mVarKey];
+}
+mReady = micro && mStats.length > 0
+mNoData = !micro ? "No PUC stations with sensor data."
+  : `No paired ${mVar.what} data for this selection yet (ERA5-Land humidity arrives with the next data run).`
+
 fmt1 = d3.format("+.1f")
 outline = micro ? micro.outline.lon.map((x, i) => [x, micro.outline.lat[i]]) : []
 mSt = micro ? transpose(micro.stations) : []
 
-// Rows passing the hour and season filters, delta in deg C.
+// Rows passing the variable, hour, and season filters, in the variable's units.
 mRows = {
   if (!micro) return [];
-  const h = micro.hourly, [h0, h1] = mHours, out = [];
+  const h = micro.hourly, P = h[mVar.puc], E = h[mVar.era], [h0, h1] = mHours, out = [];
+  if (!P || !E) return out;
   for (let i = 0; i < h.s.length; i++) {
+    if (P[i] == null || E[i] == null) continue;
     if (h.hour[i] < h0 || h.hour[i] > h1 || !mSeason.includes(h.month[i])) continue;
-    out.push({ s: h.s[i], day: h.day[i], hour: h.hour[i], puc: h.puc[i] / 10, era: h.era5[i] / 10 });
+    out.push({ s: h.s[i], day: h.day[i], hour: h.hour[i], puc: P[i] / 10, era: E[i] / 10 });
   }
   return out;
 }
@@ -517,11 +538,12 @@ dMax = Math.max(0.5, d3.max(mStats, d => Math.abs(d.mean)) ?? 0.5)
 
 diurnal = {
   if (!micro) return [];
-  const h = micro.hourly, acc = new Map();
+  const h = micro.hourly, P = h[mVar.puc], E = h[mVar.era], acc = new Map();
+  if (!P || !E) return [];
   for (let i = 0; i < h.s.length; i++) {
-    if (!mSeason.includes(h.month[i])) continue;
+    if (P[i] == null || E[i] == null || !mSeason.includes(h.month[i])) continue;
     const k = h.s[i] * 24 + h.hour[i], a = acc.get(k) ?? [0, 0];
-    a[0] += (h.puc[i] - h.era5[i]) / 10; a[1]++; acc.set(k, a);
+    a[0] += (P[i] - E[i]) / 10; a[1]++; acc.set(k, a);
   }
   return [...acc].map(([k, [t, n]]) => ({ name: mSt[Math.floor(k / 24)].name, hour: k % 24, mean: t / n }))
     .sort((a, b) => a.name.localeCompare(b.name) || a.hour - b.hour);
@@ -580,6 +602,11 @@ Intervals resample whole sampled days, which keeps within-day autocorrelation.
 A station delta mixes real microclimate (tree cover, pavement, cold-air pooling in valleys) with sensor offset and enclosure heating, and the two cannot be separated without a co-located reference thermometer.
 Night deltas are less affected by sun heating, so between-station differences at night are the better microclimate estimate.
 The spread panel compares how much stations differ on the same day with how much ERA5-Land differs at the same points; a PUC spread well above the ERA5-Land spread means local variation that the reanalysis does not resolve.
+
+The Variable control repeats the comparison for humidity.
+*Dew point* is the cleaner humidity comparison: it depends only on the water content of the air, which enclosure heating does not change, so PUC dew point (from the sensor's own temperature and RH, inverse Magnus formula) compares directly with the ERA5-Land dew point.
+*Relative humidity* compares ERA5-Land RH with the PUC reading re-expressed at the ERA5-Land air temperature (as on the Trends page), so its delta mostly mirrors the dew point delta.
+Raw sensor RH is not compared because enclosure heating alone lowers it by roughly 14 points.
 
 **Assumptions that can fail.** Station effort is not constant (stations join, go offline, and move).
 Detection probability varies by species, distance, and background noise, so ranks compare detectability-weighted activity, not abundance.
