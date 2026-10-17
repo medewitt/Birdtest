@@ -1,9 +1,13 @@
 [project]
 name = "birdtest"
 version = "0.1.0"
-description = "Forsyth County BirdWeather dashboard (Quarto CLI pinned via uv)"
+description = "Forsyth County BirdWeather dashboard (Quarto CLI and Python tools pinned via uv)"
 requires-python = ">=3.11"
-dependencies = ["quarto-cli==1.10.19"]
+dependencies = [
+    "numpy>=2.1",
+    "pyarrow>=18",
+    "quarto-cli==1.10.19",
+]
 
 [tool.uv]
 package = false

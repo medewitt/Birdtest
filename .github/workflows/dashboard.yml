@@ -80,6 +80,13 @@ jobs:
         if: env.UPDATE_DATA == 'true'
         run: Rscript scripts/update_cache.R
 
+      # Derived from the counts; refit on every run so PR renders match the code.
+      - name: Fit seasonal components
+        run: |
+          if ls data/cache/counts/*.parquet >/dev/null 2>&1; then
+            uv run --frozen python scripts/seasonal.py
+          fi
+
       - name: Push cache snapshot
         if: env.UPDATE_DATA == 'true'
         working-directory: data/cache

@@ -48,6 +48,7 @@ viewof units = Inputs.radio(["°C", "°F"], { label: "Temperature", value: "°C"
 Drag on the strip above the charts to zoom the date range.
 Click or tap the strip outside the selection to reset.
 Hover over or tap a line for values.
+The Seasonal tab pools all dates, so the date range and trailing window do not apply to it.
 
 ## Column
 
@@ -155,6 +156,31 @@ highlight(Plot.plot({
     }))
   ]
 }))
+```
+
+```{ojs}
+//| title: Seasonal component
+// Fitted annual cycle (scripts/seasonal.py) on a reference year.
+seas ? highlight(Plot.plot({
+  className: "bw-chart",
+  marginLeft: mLeft, marginRight: mRight,
+  x: { type: "utc", domain: [seasDates[0], seasYearEnd], label: null, tickFormat: "%b", ticks: narrow ? 4 : 12 },
+  y: { grid: true, domain: [0, seasTop], label: `Seasonal component (× species' annual average, ${norm === "share" ? "share" : "per station-day"})` },
+  marks: [
+    Plot.ruleY([1], { stroke: "#777", strokeDasharray: "3,3" }),
+    Plot.areaY(seasRows, { x: "date", y1: "lo", y2: "hi", z: "sp", fill: d => colorOf(d.sp), fillOpacity: 0.15,
+                           filter: d => picked.includes(d.sp), clip: true }),
+    Plot.line(seasRows, { x: "date", y: "est", z: "sp", stroke: d => colorOf(d.sp), clip: true }),
+    Plot.text(seasRows, Plot.selectLast({
+      x: "date", y: "est", z: "sp", text: "sp", ...endLabel,
+      fill: d => colorOf(d.sp), filter: d => picked.includes(d.sp)
+    })),
+    Plot.tip(seasRows, Plot.pointer({
+      x: "date", y: "est",
+      title: d => `${d.sp}\n${d3.utcFormat("%b %-d")(d.date)}\n${d3.format(".2f")(d.est)}× annual average (95% interval ${d3.format(".2f")(d.lo)}-${d3.format(".2f")(d.hi)})`
+    }))
+  ]
+}), seasOrder) : html`<p class="small">No seasonal fit in the cache. Run <code>uv run python scripts/seasonal.py</code>.</p>`
 ```
 
 ### Row {height="28%" .tabset}
@@ -315,14 +341,14 @@ rows = {
 seriesOrder = [...new Set(rows.map(d => d.sp))]
 
 // Hover highlighting. Plot draws one <path> per series in data order.
-function highlight(chart) {
+function highlight(chart, order = seriesOrder) {
   const paths = chart.querySelectorAll('g[aria-label="line"] path');
   chart.addEventListener("input", () => {
     const sp = chart.value?.sp;
     paths.forEach((p, i) => {
-      const on = !sp || seriesOrder[i] === sp;
-      p.setAttribute("stroke-opacity", on ? (picked.includes(seriesOrder[i]) || sp ? 1 : 0.45) : 0.08);
-      p.setAttribute("stroke-width", sp && seriesOrder[i] === sp ? 3 : (picked.includes(seriesOrder[i]) ? 2 : 1));
+      const on = !sp || order[i] === sp;
+      p.setAttribute("stroke-opacity", on ? (picked.includes(order[i]) || sp ? 1 : 0.45) : 0.08);
+      p.setAttribute("stroke-width", sp && order[i] === sp ? 3 : (picked.includes(order[i]) ? 2 : 1));
     });
   });
   chart.dispatchEvent(new Event("input"));
@@ -330,6 +356,31 @@ function highlight(chart) {
 }
 
 winLabel = win === 1 ? "daily" : `trailing ${win}-day`
+
+// Seasonal component: species-major columns on a day-of-year grid, drawn on
+// the reference year 2001 and closed at Jan 1 of the next year.
+seas = bw.seasonal ?? null
+seasDates = seas ? seas.doy.map(d => new Date(Date.UTC(2001, 0, d))) : []
+seasYearEnd = new Date(Date.UTC(2002, 0, 1))
+seasRows = {
+  if (!seas) return [];
+  const s = seas[norm], nd = seas.doy.length, out = [];
+  const order = [...visible].sort((a, b) => picked.includes(a.common_name) - picked.includes(b.common_name));
+  for (const sp of order) {
+    const at = i => ({ sp: sp.common_name, est: s.est[sp.idx * nd + i], lo: s.lo[sp.idx * nd + i], hi: s.hi[sp.idx * nd + i] });
+    if (at(0).est == null) continue;  // species not fitted
+    for (let i = 0; i < nd; i++) out.push({ date: seasDates[i], ...at(i) });
+    out.push({ ...at(0), date: seasYearEnd });
+  }
+  return out;
+}
+seasOrder = [...new Set(seasRows.map(d => d.sp))]
+// Scale to the highlighted species so residents are not flattened by
+// migrants peaking near 10; other series are clipped.
+seasTop = {
+  const hl = seasRows.filter(d => picked.includes(d.sp));
+  return 1.05 * (d3.max(hl.length ? hl : seasRows, d => Math.max(d.est, d.hi)) ?? 2);
+}
 xDomain = [dates[idxRange[0]], dates[idxRange[1]]]
 
 rhRows = {
@@ -682,6 +733,15 @@ Raw sensor RH is not compared because enclosure heating alone lowers it by rough
 **Assumptions that can fail.** Station effort is not constant (stations join, go offline, and move).
 Detection probability varies by species, distance, and background noise, so ranks compare detectability-weighted activity, not abundance.
 Day boundaries follow the BirdWeather API's daily bins.
+
+**Seasonal component.** For each of the shipped species, `scripts/seasonal.py` fits a quasi-Poisson log-linear regression to the daily county count, with the selected normalization as an offset (all detections for *share*, active stations for *per station-day*).
+The linear predictor is an intercept, a linear trend in time, and three annual harmonic pairs (sine and cosine of 1, 2, and 3 cycles per year).
+The plotted curve is the exponentiated harmonic part divided by its mean over the year, so 1 is the species' average day and 0 is absence, with trend and effort removed.
+Bands are 95% percentile intervals from a moving-block bootstrap over days (28-day blocks, 200 resamples, seed 1834), refitting on each resample; they are shown for highlighted species.
+The model assumes the same annual cycle every year and a trend that is linear on the log scale.
+The record covers less than two years, so season and trend are only partly separable and the fit leans on the months observed in both years; one station reported before August 2025 and there are no detections in April and May 2025.
+Three harmonics smooth sharp arrivals and departures, so a migrant's curve rises earlier and falls later than its true presence and can show small ripples above zero in months when it is absent.
+The curve tracks detected vocal activity, so a spring peak in a resident species can reflect song rather than numbers.
 
 Detections through `r m$data_through`; rendered `r m$rendered`.
 :::
