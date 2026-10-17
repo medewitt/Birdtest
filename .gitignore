@@ -53,3 +53,6 @@ rsconnect/
 /dashboard.html
 /dashboard_files/
 /.quarto/
+
+# uv
+/.venv/

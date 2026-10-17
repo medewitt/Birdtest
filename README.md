@@ -18,9 +18,11 @@ It shows species rank over time, normalized detection counts, and daily temperat
 
 ```bash
 Rscript scripts/update_cache.R   # first run pulls full history; later runs fetch the last 7 days
-quarto render dashboard.qmd
+uv sync                          # installs the pinned Quarto CLI (quarto-cli on PyPI)
+uv run quarto render dashboard.qmd
 ```
 
+Quarto is pinned in `pyproject.toml` / `uv.lock` and run through uv.
 Required R packages: `birdweatheR` (GitHub, `BrentPease1/birdweatheR`), `data.table`, `nanoparquet`, `jsonlite`, `maps`, `ggplot2`, `knitr`, `rmarkdown`.
 The dashboard loads Observable Plot and d3 from cdn.jsdelivr.net at view time, as all Quarto OJS pages do.
 
