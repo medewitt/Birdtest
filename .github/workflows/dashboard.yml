@@ -114,6 +114,7 @@ jobs:
           uv run quarto render dashboard.qmd
           mkdir -p _site
           cp -r dashboard.html dashboard_files _site/
+          mkdir -p _site/assets && cp -r assets/fonts _site/assets/
           mv _site/dashboard.html _site/index.html
 
       - uses: actions/upload-pages-artifact@v3
