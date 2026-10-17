@@ -165,7 +165,8 @@ update_weather <- function(from = HISTORY_START, to = Sys.Date()) {
 # from (SEED, year, month), so the sample is stable across runs and shared by
 # all stations (paired comparisons). The API resolves a period to the local
 # (America/New_York) calendar day named in the request, so sampled days are
-# local days, each pulled in full so diurnal cycles are complete. Raw readings
+# local days, each pulled in full (see fetch_env_day) so diurnal cycles are
+# complete. Raw readings
 # (~2,000/day/station) are reduced to hourly means before anything is written.
 # ---------------------------------------------------------------------------
 puc_sample_days <- function(from = HISTORY_START, to = Sys.Date() - 1L,
@@ -192,9 +193,8 @@ parse_ts <- function(x) {
 }
 
 # One local day of PUC environment readings (timestamp, temperature, humidity).
-# birdweatheR::get_environment_data() post-filters to the UTC day, which cuts
-# local 20:00-23:59 EDT from a local-day response, so this calls the same
-# GraphQL query directly and filters to the local date here.
+# birdweatheR::get_environment_data() post-filters to the UTC day, so this
+# calls the same GraphQL query directly and filters to the local date here.
 fetch_env_day <- function(sid, d) {
   # ghql rejects declared variables that are not supplied, so the first page
   # uses a query without $after (as birdweatheR does).
@@ -212,8 +212,13 @@ fetch_env_day <- function(sid, d) {
   # birdweatheR:::fetch_page_with_retry() executes query_exec$url_link.
   first_q <- ghql::Query$new()$query("url_link", q(FALSE))
   next_q  <- ghql::Query$new()$query("url_link", q(TRUE))
+  # Observed API behavior: the period starts at local midnight of the `from`
+  # date but ends at the `to` instant, so `to` must be the local end of day
+  # in UTC (03:59:59Z or 04:59:59Z the next day, depending on DST).
+  end_local <- as.POSIXct(paste(d + 1L, "00:00:00"), tz = TZ_LOCAL) - 1
   vars <- list(id = as.character(sid), first = 250L,
-               period = list(from = paste0(d, "T00:00:00.000Z"), to = paste0(d, "T23:59:59.000Z")))
+               period = list(from = paste0(d, "T00:00:00.000Z"),
+                             to   = format(end_local, "%Y-%m-%dT%H:%M:%S.000Z", tz = "UTC")))
   pages <- list()
   repeat {
     res <- birdweatheR:::fetch_page_with_retry(if (is.null(vars$after)) first_q else next_q, vars)
@@ -234,13 +239,13 @@ fetch_env_day <- function(sid, d) {
 PUC_TEMP_RANGE <- c(-30, 50)
 
 # Bump when the PUC cache layout or sampling unit changes; a mismatch refetches.
-PUC_CACHE_VERSION <- "local-day-v2"
+PUC_CACHE_VERSION <- "local-day-v3"
 
 update_puc_hourly <- function(stations, counts = NULL, days = puc_sample_days()) {
   puc  <- stations[station_type == "puc", station_id]
   old  <- read_pq(cache_path("puc_hourly.parquet"))
   done <- read_pq(cache_path("puc_days_done.parquet"))
-  # v1 caches sampled UTC days through the package filter (missing 4 h/day).
+  # Earlier versions stored days missing local 20:00-23:59 (v1, v2).
   if (is.null(done) || !identical(PUC_CACHE_VERSION, done$version[1])) {
     if (!is.null(done)) message("PUC cache format changed; refetching sampled days.")
     old  <- NULL
