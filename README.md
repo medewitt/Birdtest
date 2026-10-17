@@ -12,6 +12,7 @@ It shows species rank over time, normalized detection counts, and daily temperat
 | `R/prepare.R` | Builds the compact browser payload (ranks, daily totals, temperature) |
 | `scripts/update_cache.R` | Refreshes the cache |
 | `dashboard.qmd` | Dashboard (Observable Plot via Quarto OJS) |
+| `data/species_status.csv` | Curated residency status, note, and source DOI for the Local ecology table |
 | `data/cache/` | Parquet cache |
 
 ## Run
@@ -62,3 +63,6 @@ To work with it locally, run `git worktree add data/cache cache`.
 The manual dispatch has a `full_refresh` option that discards the cache and pulls full history.
 
 One-time setup: in the repository settings, set Pages to deploy from GitHub Actions, and make sure Actions has read and write permission for contents.
+
+The Local ecology page lists the top 15 species with Wikipedia links, residency status for the NC Piedmont (Local, Migratory, or Both) from `data/species_status.csv`, and an effort-normalized monthly seasonality profile computed from the detections.
+Species that enter the top 15 without a row in the CSV show as "Not classified" until a row is added.

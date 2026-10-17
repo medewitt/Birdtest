@@ -559,6 +559,66 @@ spread = {
 }
 ```
 
+# Local ecology
+
+## Row
+
+### Column {width="68%"}
+
+```{r}
+#| title: "Top 15 species: residency and local seasonality"
+refs <- c(
+  "10.1676/13-038.1"         = "McClure et al. (2013). Seasonal use of habitat by shrub-breeding birds in a southeastern national forest.",
+  "10.3389/fevo.2021.691808" = "Cornelius et al. (2021). Seasonal patterns of fat deposits in relation to migratory strategy in facultative migrants.",
+  "10.1515/ami-2016-0004"    = "Brown et al. (2016). Band recoveries reveal alternative migration strategies in American Robins. Animal Migration.",
+  "10.2307/4084660"          = "Kuenzel et al. (1974). An annual cycle study of tan-striped and white-striped White-throated Sparrows. The Auk.",
+  "10.1642/auk-18-23.1"      = "Townsend et al. (2018). Where do winter crows go? Characterizing partial migration of American Crows with satellite telemetry, stable isotopes, and molecular markers. The Auk.",
+  "10.1002/ecs2.4316"        = "Sonnleitner et al. (2022). Rapid shifts in migration routes and breeding latitude in North American bluebirds. Ecosphere."
+)
+eco <- build_ecology(read_cache())
+ref_no <- setNames(seq_along(refs), names(refs))
+wiki <- function(x) paste0("https://en.wikipedia.org/wiki/", utils::URLencode(gsub(" ", "_", x)))
+src <- ifelse(eco$source %in% names(refs),
+  sprintf('<a href="https://doi.org/%s">[%d]</a>', eco$source, ref_no[eco$source]),
+  "general range knowledge")
+tab <- data.frame(
+  `#` = eco$rank,
+  Species = sprintf('<a href="%s" target="_blank">%s</a>', wiki(eco$common_name), eco$common_name),
+  `Scientific name` = sprintf("<i>%s</i>", eco$scientific_name),
+  Detections = format(eco$detections, big.mark = ","),
+  Status = sprintf("<b>%s</b>", eco$status),
+  `Seasonality (Jan-Dec)` = sprintf('<span class="bw-spark" title="Share of all detections by calendar month, scaled to the peak month">%s</span>', eco$seasonality),
+  Note = eco$note,
+  Source = src,
+  check.names = FALSE
+)
+htmltools::div(class = "bw-table-wrap",
+  htmltools::HTML(knitr::kable(tab, format = "html", escape = FALSE,
+                               table.attr = 'class="table table-sm bw-eco"')))
+```
+
+### Column {width="32%"}
+
+::: {.card title="How to read this table"}
+**Status** is the usual pattern for the North Carolina Piedmont.
+*Local*: present year-round and essentially non-migratory.
+*Migratory*: present only seasonally.
+*Both*: present year-round, with migrants from farther north joining or replacing local birds in winter.
+
+**Seasonality** is computed from the BirdWeather detections.
+Each bar is the species' share of all detections in that calendar month, pooled over years and scaled to its peak month, so months with more stations online do not look busier.
+Bars reflect vocal activity as well as presence: many residents sing less in late summer, and BirdNET misidentifications add low-level noise.
+
+**Sources.** Numbered sources are peer-reviewed papers found with Consensus that describe the species' migratory behavior.
+Status for species marked "general range knowledge" follows standard range accounts and was not checked against a specific paper.
+Wikipedia links go to each species' article.
+
+```{r}
+#| output: asis
+cat(sprintf('%d. %s <a href="https://doi.org/%s">doi:%s</a>', seq_along(refs), refs, names(refs), names(refs)), sep = "\n")
+```
+:::
+
 # Methods
 
 ## Row

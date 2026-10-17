@@ -21,3 +21,9 @@
   .quarto-dashboard .bslib-value-box .value-box-title { font-size: 0.8rem; margin: 0; }
   .quarto-dashboard .bslib-value-box .value-box-value { font-size: 1.35rem; }
 }
+
+// Local ecology table.
+.quarto-dashboard .bw-table-wrap { overflow-x: auto; }
+.quarto-dashboard table.bw-eco { font-size: 0.85rem; }
+.quarto-dashboard table.bw-eco td { vertical-align: middle; }
+.quarto-dashboard .bw-spark { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 1px; color: #0072B2; white-space: nowrap; }

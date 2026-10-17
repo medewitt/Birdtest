@@ -189,3 +189,32 @@ build_micro <- function(cache) {
     outline = list(lon = round(poly$lon, 4), lat = round(poly$lat, 4))
   )
 }
+
+# Local ecology table: top species with Wikipedia links, curated status
+# (data/species_status.csv), and an effort-normalized seasonality profile.
+# Seasonality is each species' share of all detections in a calendar month,
+# pooled over years and scaled to the species' peak month, so months with more
+# stations online do not look busier.
+build_ecology <- function(cache, n = 15L, status_file = "data/species_status.csv") {
+  cnt <- cache$counts
+  top <- cnt[, .(detections = sum(count)), by = species_id][order(-detections)][seq_len(min(n, .N))]
+  top <- cache$species[top, on = "species_id"]
+  top[, rank := .I]
+  status <- if (file.exists(status_file)) fread(status_file) else data.table(scientific_name = character())
+  top <- status[top, on = "scientific_name"]
+  top[is.na(status), `:=`(status = "Not classified", note = "", source = "")]
+
+  m <- cnt[, .(n = sum(count)), by = .(species_id, month = month(date))]
+  m[, share := n / sum(n), by = month]
+  m <- m[species_id %in% top$species_id]
+  grid <- CJ(species_id = top$species_id, month = 1:12)
+  m <- m[grid, on = .(species_id, month)][is.na(share), share := 0]
+  bars <- c("▁", "▂", "▃", "▄", "▅", "▆", "▇", "█")
+  spark <- m[order(month), .(seasonality = {
+    r <- share / max(share)
+    paste(bars[pmax(1L, ceiling(r * length(bars)))], collapse = "")
+  }), by = species_id]
+  top <- spark[top, on = "species_id"]
+  setorder(top, rank)
+  top[, .(rank, common_name, scientific_name, detections, status, note, source, seasonality)]
+}
