@@ -5,7 +5,7 @@
 #   counts/<year>.parquet      station_id, date, species_id, count (all int32/Date)
 #   progress.parquet           station_id, fetched_through
 #   species.parquet            species_id, common_name, scientific_name
-#   weather_era5.parquet       date, tmin, tmean, tmax (deg C, Open-Meteo ERA5)
+#   weather_era5.parquet       date, tmin, tmean, tmax (deg C), rhmin, rhmean, rhmax (%), Open-Meteo ERA5
 #   puc_hourly.parquet         station_id, time (UTC hour), temp, humidity, n
 #   puc_days_done.parquet      station_id, date (sampled local days fetched), version
 #   era5_hourly.parquet        station_id, time, era5 (deg C, ERA5-Land), elevation
@@ -145,14 +145,18 @@ update_weather <- function(from = HISTORY_START, to = Sys.Date()) {
   url <- sprintf(paste0(
     "https://archive-api.open-meteo.com/v1/archive?latitude=%.4f&longitude=%.4f",
     "&start_date=%s&end_date=%s&timezone=%s",
-    "&daily=temperature_2m_min,temperature_2m_mean,temperature_2m_max"
+    "&daily=temperature_2m_min,temperature_2m_mean,temperature_2m_max",
+    ",relative_humidity_2m_min,relative_humidity_2m_mean,relative_humidity_2m_max"
   ), ctr[["lat"]], ctr[["lon"]], from, to, utils::URLencode(TZ_LOCAL, reserved = TRUE))
   j <- with_retry(function() jsonlite::fromJSON(url))
   w <- data.table(
-    date  = as.Date(j$daily$time),
-    tmin  = j$daily$temperature_2m_min,
-    tmean = j$daily$temperature_2m_mean,
-    tmax  = j$daily$temperature_2m_max
+    date   = as.Date(j$daily$time),
+    tmin   = j$daily$temperature_2m_min,
+    tmean  = j$daily$temperature_2m_mean,
+    tmax   = j$daily$temperature_2m_max,
+    rhmin  = j$daily$relative_humidity_2m_min,
+    rhmean = j$daily$relative_humidity_2m_mean,
+    rhmax  = j$daily$relative_humidity_2m_max
   )[!is.na(tmean)]
   write_pq(w, cache_path("weather_era5.parquet"))
   w

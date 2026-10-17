@@ -155,10 +155,10 @@ highlight(Plot.plot({
 }))
 ```
 
-### Row {height="28%"}
+### Row {height="28%" .tabset}
 
 ```{ojs}
-//| title: "Temperature: ERA5 daily mean with min-max band (blue), PUC sensor daily mean (orange points)"
+//| title: Temperature
 Plot.plot({
   className: "bw-chart",
   marginLeft: mLeft, marginRight: mRight,
@@ -168,10 +168,35 @@ Plot.plot({
     Plot.areaY(tempRows, { x: "date", y1: "lo", y2: "hi", fill: "#0072B2", fillOpacity: 0.18, curve: "step" }),
     Plot.lineY(tempRows, { x: "date", y: "mid", stroke: "#0072B2", curve: "step" }),
     Plot.dot(tempRows, { x: "date", y: "puc", r: 1.4, fill: "#D55E00", filter: d => Number.isFinite(d.puc) }),
+    keyMark([["ERA5 daily mean, min-max band", "#0072B2"], ["PUC sensor daily mean", "#D55E00"]]),
     Plot.tip(tempRows, Plot.pointerX({
       x: "date", y: "mid",
       title: d => `${d.date.toISOString().slice(0, 10)}\nERA5 ${d3.format(".1f")(d.lo)} / ${d3.format(".1f")(d.mid)} / ${d3.format(".1f")(d.hi)} ${units}` +
         (Number.isFinite(d.puc) ? `\nPUC ${d3.format(".1f")(d.puc)} ${units}` : "")
+    }))
+  ]
+})
+```
+
+```{ojs}
+//| title: Relative humidity
+Plot.plot({
+  className: "bw-chart",
+  marginLeft: mLeft, marginRight: mRight,
+  x: { domain: xDomain, label: null, ticks: narrow ? 4 : undefined },
+  y: { grid: true, domain: [0, 100], label: "Relative humidity (%)" },
+  marks: [
+    Plot.areaY(rhRows, { x: "date", y1: "lo", y2: "hi", fill: "#0072B2", fillOpacity: 0.18, curve: "step" }),
+    Plot.lineY(rhRows, { x: "date", y: "mid", stroke: "#0072B2", curve: "step" }),
+    Plot.dot(rhRows, { x: "date", y: "puc", r: 1.4, fill: "#D55E00", filter: d => Number.isFinite(d.puc) }),
+    Plot.dot(rhRows, { x: "date", y: "adj", r: 1.4, fill: "#CC79A7", filter: d => Number.isFinite(d.adj) }),
+    keyMark([["ERA5 daily mean, min-max band", "#0072B2"], ["PUC sensor, as measured", "#D55E00"],
+             ["PUC at outdoor temperature", "#CC79A7"]], "bottom-left"),
+    Plot.tip(rhRows, Plot.pointerX({
+      x: "date", y: "mid",
+      title: d => `${d.date.toISOString().slice(0, 10)}\nERA5 ${d3.format(".0f")(d.lo)} / ${d3.format(".0f")(d.mid)} / ${d3.format(".0f")(d.hi)} %` +
+        (Number.isFinite(d.puc) ? `\nPUC measured ${d3.format(".0f")(d.puc)} %` : "") +
+        (Number.isFinite(d.adj) ? `\nPUC at outdoor temperature ${d3.format(".0f")(d.adj)} %` : "")
     }))
   ]
 })
@@ -202,7 +227,8 @@ okabeIto = ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9", "#
 resizeNudge = {
   const nudge = () => window.dispatchEvent(new Event("resize"));
   [400, 1500].forEach(ms => setTimeout(nudge, ms));
-  document.addEventListener("shown.bs.tab", nudge);
+  // Tab panes fade in, so measure again once the transition has settled.
+  document.addEventListener("shown.bs.tab", () => [0, 250, 700].forEach(ms => setTimeout(nudge, ms)));
 }
 
 num = a => Float64Array.from(a, v => v == null ? NaN : v)
@@ -303,6 +329,26 @@ function highlight(chart) {
 
 winLabel = win === 1 ? "daily" : `trailing ${win}-day`
 xDomain = [dates[idxRange[0]], dates[idxRange[1]]]
+
+rhRows = {
+  const [i0, i1] = idxRange;
+  const lo = rollMean(num(bw.daily.rhmin), win), mid = rollMean(num(bw.daily.rhmean), win),
+        hi = rollMean(num(bw.daily.rhmax), win), puc = num(bw.daily.puc_rh), adj = num(bw.daily.puc_rh_adj);
+  const out = [];
+  for (let i = i0; i <= i1; i++) out.push({ date: dates[i], lo: lo[i], mid: mid[i], hi: hi[i], puc: puc[i], adj: adj[i] });
+  return out;
+}
+
+// Color key drawn inside the frame: a Plot legend would make the figure
+// taller than its cell, which Quarto then grows to match on phones.
+function keyMark(items, anchor = "top-left") {
+  const top = anchor.startsWith("top");
+  return items.map(([label, color], i) => Plot.text([label], {
+    frameAnchor: anchor, dx: 6, dy: top ? 4 + 13 * i : -4 - 13 * (items.length - 1 - i), text: d => "\u25CF " + d,
+    fill: color, fontSize: 10, textAnchor: "start", lineAnchor: top ? "top" : "bottom",
+    stroke: "white", strokeWidth: 3, paintOrder: "stroke"
+  }));
+}
 
 tempRows = {
   const [i0, i1] = idxRange;
@@ -518,6 +564,12 @@ Ranks are computed over every species before the top-N filter, so a rank is the 
 Points are the mean across BirdWeather PUC stations of each station's local-day mean on-board sensor temperature, kept for days with at least 20 of 24 hours observed.
 PUC temperature is a stratified random subsample, `r PUC_DAYS_PER_MONTH` local calendar days per month (seed 1834), shared by all stations, so points appear only on sampled days.
 PUC sensors sit in an enclosure and can read warm in direct sun.
+
+**Relative humidity.** The line and band are ERA5 daily mean, min, and max relative humidity at the county centroid (Open-Meteo), smoothed with the same trailing window.
+Orange points are the PUC sensor reading, averaged over stations and local days with at least 20 hours.
+A warm enclosure lowers the measured RH without changing the water content of the air, so the sensor reads dry.
+Purple points re-express each hourly reading at outdoor air temperature: the vapor pressure implied by the sensor's own temperature and RH (Magnus formula) is divided by the saturation vapor pressure at the ERA5-Land temperature for that station and hour, capped at 100%.
+This assumes the enclosure air exchanges freely with outside air and that ERA5-Land temperature is close to the true air temperature at the station.
 
 **Microclimate.** Readings outside -30 to 50 °C are dropped as sensor faults or enclosure heating.
 Hourly PUC means (hours with at least 30 readings) are paired with ERA5-Land hourly 2 m temperature from Open-Meteo at each station's coordinates.

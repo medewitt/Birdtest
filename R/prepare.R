@@ -71,8 +71,14 @@ build_payload <- function(cache = read_cache()) {
   rank_cols <- paste0("r", WINDOWS)
 
   weather <- cache$weather[data.table(date = days), on = "date"]
-  puc <- puc_daily(cache$puc)[, .(puc_tmean = mean(tmean), puc_n = .N), by = date]
+  puc <- puc_daily(cache$puc, cache$era5_h)[, .(
+    puc_tmean  = mean(tmean),
+    puc_rh     = mean(rh, na.rm = TRUE),
+    puc_rh_adj = mean(rh_adj, na.rm = TRUE),
+    puc_n      = .N
+  ), by = date]
   weather <- puc[weather, on = "date"]
+  for (v in c("rhmin", "rhmean", "rhmax")) if (!v %in% names(weather)) weather[, (v) := NA_real_]
 
   list(
     meta = list(
@@ -95,19 +101,41 @@ build_payload <- function(cache = read_cache()) {
       tmin  = round(weather$tmin, 1),
       tmean = round(weather$tmean, 1),
       tmax  = round(weather$tmax, 1),
-      puc_tmean = round(weather$puc_tmean, 1)
+      puc_tmean = round(weather$puc_tmean, 1),
+      rhmin  = round(weather$rhmin),
+      rhmean = round(weather$rhmean),
+      rhmax  = round(weather$rhmax),
+      puc_rh     = round(weather$puc_rh),
+      puc_rh_adj = round(weather$puc_rh_adj)
     ),
     micro = build_micro(cache)
   )
 }
 
+# Saturation vapor pressure over water (hPa), Magnus form (Alduchov & Eskridge
+# coefficients), adequate for -40 to 50 deg C.
+svp <- function(t) 6.1094 * exp(17.625 * t / (t + 243.04))
+
 # Local-day PUC means, kept only for days with >= 20 of 24 hours observed.
-puc_daily <- function(puc) {
+# rh is the sensor reading. rh_adj re-expresses the same vapor pressure at the
+# ERA5-Land air temperature for that station-hour: the enclosure warms the air
+# without adding water, so the sensor's dew point carries over but its RH does
+# not.
+puc_daily <- function(puc, era5_h = NULL) {
   if (is.null(puc) || !nrow(puc)) {
-    return(data.table(station_id = integer(), date = as.Date(character()), tmean = numeric()))
+    return(data.table(station_id = integer(), date = as.Date(character()),
+                      tmean = numeric(), rh = numeric(), rh_adj = numeric()))
   }
   p <- copy(puc)[, date := as.Date(time, tz = TZ_LOCAL)]
-  p[, .(tmean = mean(temp), hours = .N), by = .(station_id, date)][hours >= 20L, !"hours"]
+  p[, rh := fifelse(humidity > 0 & humidity <= 100, humidity, NA_real_)]
+  if (!is.null(era5_h) && nrow(era5_h)) {
+    p <- era5_h[, .(station_id, time, era5)][p, on = .(station_id, time)]
+    p[, rh_adj := pmin(100, rh * svp(temp) / svp(era5))]
+  } else {
+    p[, rh_adj := NA_real_]
+  }
+  p[, .(tmean = mean(temp), rh = mean(rh, na.rm = TRUE), rh_adj = mean(rh_adj, na.rm = TRUE),
+        hours = .N), by = .(station_id, date)][hours >= 20L, !"hours"]
 }
 
 # Microclimate payload: hourly PUC vs ERA5-Land at each PUC station.
