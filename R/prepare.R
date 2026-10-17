@@ -191,11 +191,18 @@ build_micro <- function(cache) {
 }
 
 # Local ecology table: top species with Wikipedia links, curated status
-# (data/species_status.csv), and an effort-normalized seasonality profile.
+# (data/species_status.csv), a West Nile virus flag (CDC list of dead-bird
+# species with WNV detected, 1999-2016), and an effort-normalized seasonality
+# profile.
 # Seasonality is each species' share of all detections in a calendar month,
 # pooled over years and scaled to the species' peak month, so months with more
 # stations online do not look busier.
-build_ecology <- function(cache, n = 15L, status_file = "data/species_status.csv") {
+# Names compared without case, hyphens, apostrophes, or spaces, so that
+# "Black-crowned Night Heron" and "Black-crowned Night-Heron" match.
+norm_name <- function(x) gsub("[^a-z]", "", tolower(x))
+
+build_ecology <- function(cache, n = 15L, status_file = "data/species_status.csv",
+                          wnv_file = "data/wnv_bird_species_cdc_1999_2016.csv") {
   cnt <- cache$counts
   top <- cnt[, .(detections = sum(count)), by = species_id][order(-detections)][seq_len(min(n, .N))]
   top <- cache$species[top, on = "species_id"]
@@ -203,6 +210,8 @@ build_ecology <- function(cache, n = 15L, status_file = "data/species_status.csv
   status <- if (file.exists(status_file)) fread(status_file) else data.table(scientific_name = character())
   top <- status[top, on = "scientific_name"]
   top[is.na(status), `:=`(status = "Not classified", note = "", source = "")]
+  wnv <- if (file.exists(wnv_file)) fread(wnv_file)$common_name else character()
+  top[, wnv := norm_name(common_name) %in% norm_name(wnv)]
 
   m <- cnt[, .(n = sum(count)), by = .(species_id, month = month(date))]
   m[, share := n / sum(n), by = month]
@@ -216,5 +225,5 @@ build_ecology <- function(cache, n = 15L, status_file = "data/species_status.csv
   }), by = species_id]
   top <- spark[top, on = "species_id"]
   setorder(top, rank)
-  top[, .(rank, common_name, scientific_name, detections, status, note, source, seasonality)]
+  top[, .(rank, common_name, scientific_name, detections, status, note, source, seasonality, wnv)]
 }
