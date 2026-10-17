@@ -196,24 +196,27 @@ parse_ts <- function(x) {
 # local 20:00-23:59 EDT from a local-day response, so this calls the same
 # GraphQL query directly and filters to the local date here.
 fetch_env_day <- function(sid, d) {
-  q <- '
-    query station($id: ID!, $period: InputDuration, $first: Int, $after: String) {
+  # ghql rejects declared variables that are not supplied, so the first page
+  # uses a query without $after (as birdweatheR does).
+  q <- function(after) sprintf('
+    query station($id: ID!, $period: InputDuration, $first: Int%s) {
       station(id: $id) {
         sensors {
-          environmentHistory(period: $period, first: $first, after: $after) {
+          environmentHistory(period: $period, first: $first%s) {
             pageInfo { hasNextPage endCursor }
             edges { node { timestamp temperature humidity } }
           }
         }
       }
-    }'
+    }', if (after) ", $after: String" else "", if (after) ", after: $after" else "")
   # birdweatheR:::fetch_page_with_retry() executes query_exec$url_link.
-  exec <- ghql::Query$new()$query("url_link", q)
+  first_q <- ghql::Query$new()$query("url_link", q(FALSE))
+  next_q  <- ghql::Query$new()$query("url_link", q(TRUE))
   vars <- list(id = as.character(sid), first = 250L,
                period = list(from = paste0(d, "T00:00:00.000Z"), to = paste0(d, "T23:59:59.000Z")))
   pages <- list()
   repeat {
-    res <- birdweatheR:::fetch_page_with_retry(exec, vars)
+    res <- birdweatheR:::fetch_page_with_retry(if (is.null(vars$after)) first_q else next_q, vars)
     h <- res$data$station$sensors$environmentHistory
     if (is.null(h$edges) || !length(h$edges)) break
     pages[[length(pages) + 1]] <- as.data.table(h$edges$node)
