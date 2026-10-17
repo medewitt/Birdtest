@@ -54,6 +54,15 @@ build_payload <- function(cache = read_cache()) {
 
   top <- grid[, .(n = sum(count)), by = species_id][order(-n)][seq_len(min(N_SHIP, .N))]
   top <- cache$species[top, on = "species_id"]
+  # Charts key on common_name, so it must be present and unique.
+  miss <- top[is.na(common_name) | common_name == "", species_id]
+  if (length(miss)) {
+    warning("No common name for species_id ", paste(miss, collapse = ", "),
+            "; using scientific name. Re-run scripts/update_cache.R.", call. = FALSE)
+    top[species_id %in% miss, common_name := fcoalesce(scientific_name, paste("species_id", species_id))]
+  }
+  top[duplicated(common_name) | duplicated(common_name, fromLast = TRUE),
+      common_name := paste0(common_name, " (", scientific_name, ")")]
   top[, idx := .I - 1L]
 
   ship <- grid[top[, .(species_id, idx)], on = "species_id"]
