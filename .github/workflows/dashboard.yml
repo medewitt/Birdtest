@@ -1,0 +1,136 @@
+name: Update data and build dashboard
+
+on:
+  schedule:
+    - cron: "17 10 * * *"  # daily, 06:17 EDT / 05:17 EST
+  workflow_dispatch:
+    inputs:
+      full_refresh:
+        description: "Discard the cache and pull full history"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# Never run two cache updates at once; a second run waits.
+concurrency:
+  group: dashboard-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
+  cancel-in-progress: false
+
+env:
+  # Scheduled and manual runs refresh data; pushes and PRs only render.
+  UPDATE_DATA: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+  CACHE_BRANCH: cache
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330  # first full-history pull can be long
+    outputs:
+      has_data: ${{ steps.data.outputs.present }}
+    permissions:
+      contents: write  # force-push the cache branch
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: "4.5"
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::data.table
+            any::nanoparquet
+            any::jsonlite
+            any::maps
+            any::ggplot2
+            any::knitr
+            any::rmarkdown
+            any::rlang
+            github::BrentPease1/birdweatheR
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install pinned Quarto (uv.lock)
+        run: uv sync --frozen
+
+      # The cache lives on an orphan branch checked out as a worktree at
+      # data/cache, so main never carries the Parquet files or their churn.
+      - name: Check out cache branch
+        run: |
+          if git fetch --depth 1 origin "$CACHE_BRANCH:$CACHE_BRANCH" 2>/dev/null; then
+            git worktree add data/cache "$CACHE_BRANCH"
+          else
+            echo "No cache branch yet; starting empty."
+            git worktree add --orphan -b "$CACHE_BRANCH" data/cache
+          fi
+          if [ "${{ inputs.full_refresh }}" = "true" ]; then
+            find data/cache -mindepth 1 -not -path 'data/cache/.git*' -delete
+          fi
+
+      - name: Update cache
+        if: env.UPDATE_DATA == 'true'
+        run: Rscript scripts/update_cache.R
+
+      - name: Push cache snapshot
+        if: env.UPDATE_DATA == 'true'
+        working-directory: data/cache
+        env:
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          git add -A
+          if git rev-parse -q --verify HEAD >/dev/null && git diff --cached --quiet; then
+            echo "Cache unchanged."
+            exit 0
+          fi
+          # Single parentless commit: the branch never accumulates history.
+          commit=$(git commit-tree "$(git write-tree)" -m "Cache snapshot $(date -u +%F)")
+          git push --force origin "$commit:refs/heads/$CACHE_BRANCH"
+
+      - name: Check for data
+        id: data
+        run: |
+          if ls data/cache/counts/*.parquet >/dev/null 2>&1; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::No cached data; skipping render. Run the workflow manually to pull data."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Render dashboard
+        if: steps.data.outputs.present == 'true'
+        run: |
+          uv run quarto render dashboard.qmd
+          mkdir -p _site
+          cp -r dashboard.html dashboard_files _site/
+          mv _site/dashboard.html _site/index.html
+
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.data.outputs.present == 'true'
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.build.outputs.has_data == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
