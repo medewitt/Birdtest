@@ -64,5 +64,5 @@ The manual dispatch has a `full_refresh` option that discards the cache and pull
 
 One-time setup: in the repository settings, set Pages to deploy from GitHub Actions, and make sure Actions has read and write permission for contents.
 
-The Local ecology page lists the top 15 species with Wikipedia links, residency status for the NC Piedmont (Local, Migratory, or Both) from `data/species_status.csv`, and an effort-normalized monthly seasonality profile computed from the detections.
+The Local ecology page lists the top 15 species with Wikipedia links, residency status for the NC Piedmont (Resident, Migratory, or Both) from `data/species_status.csv`, and an effort-normalized monthly seasonality profile computed from the detections.
 Species that enter the top 15 without a row in the CSV show as "Not classified" until a row is added.
