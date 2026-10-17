@@ -7,7 +7,7 @@
 #   species.parquet            species_id, common_name, scientific_name
 #   weather_era5.parquet       date, tmin, tmean, tmax (deg C, Open-Meteo ERA5)
 #   puc_hourly.parquet         station_id, time (UTC hour), temp, humidity, n
-#   puc_days_done.parquet      station_id, date (sampled UTC days already fetched)
+#   puc_days_done.parquet      station_id, date (sampled local days fetched), version
 #   era5_hourly.parquet        station_id, time, era5 (deg C, ERA5-Land), elevation
 #
 # Detections are cached as server-side daily species counts, not raw rows.
@@ -163,10 +163,10 @@ update_weather <- function(from = HISTORY_START, to = Sys.Date()) {
 #
 # Each calendar month gets PUC_DAYS_PER_MONTH days drawn with a seed derived
 # from (SEED, year, month), so the sample is stable across runs and shared by
-# all stations (paired comparisons). Sampled days are UTC calendar days, the
-# unit the API resolves periods to, and each is pulled in full so diurnal
-# cycles are complete. Raw readings (~2,000/day/station) are reduced to
-# hourly means before anything is written.
+# all stations (paired comparisons). The API resolves a period to the local
+# (America/New_York) calendar day named in the request, so sampled days are
+# local days, each pulled in full so diurnal cycles are complete. Raw readings
+# (~2,000/day/station) are reduced to hourly means before anything is written.
 # ---------------------------------------------------------------------------
 puc_sample_days <- function(from = HISTORY_START, to = Sys.Date() - 1L,
                             k = PUC_DAYS_PER_MONTH) {
@@ -191,28 +191,76 @@ parse_ts <- function(x) {
   as.POSIXct(x, format = "%Y-%m-%dT%H:%M:%S%z", tz = "UTC")
 }
 
-update_puc_hourly <- function(stations, days = puc_sample_days()) {
+# One local day of PUC environment readings (timestamp, temperature, humidity).
+# birdweatheR::get_environment_data() post-filters to the UTC day, which cuts
+# local 20:00-23:59 EDT from a local-day response, so this calls the same
+# GraphQL query directly and filters to the local date here.
+fetch_env_day <- function(sid, d) {
+  q <- '
+    query station($id: ID!, $period: InputDuration, $first: Int, $after: String) {
+      station(id: $id) {
+        sensors {
+          environmentHistory(period: $period, first: $first, after: $after) {
+            pageInfo { hasNextPage endCursor }
+            edges { node { timestamp temperature humidity } }
+          }
+        }
+      }
+    }'
+  exec <- ghql::Query$new()$query("env", q)
+  vars <- list(id = as.character(sid), first = 250L,
+               period = list(from = paste0(d, "T00:00:00.000Z"), to = paste0(d, "T23:59:59.000Z")))
+  pages <- list()
+  repeat {
+    res <- birdweatheR:::fetch_page_with_retry(exec, vars)
+    h <- res$data$station$sensors$environmentHistory
+    if (is.null(h$edges) || !length(h$edges)) break
+    pages[[length(pages) + 1]] <- as.data.table(h$edges$node)
+    if (!isTRUE(h$pageInfo$hasNextPage)) break
+    vars$after <- h$pageInfo$endCursor
+  }
+  r <- rbindlist(pages, fill = TRUE)
+  if (!nrow(r)) return(r)
+  r[, ts := parse_ts(timestamp)]
+  r[!is.na(ts) & as.Date(ts, tz = TZ_LOCAL) == d]
+}
+
+# Plausible air temperature range for Forsyth County; readings outside it are
+# sensor faults or enclosure heating, not air temperature.
+PUC_TEMP_RANGE <- c(-30, 50)
+
+# Bump when the PUC cache layout or sampling unit changes; a mismatch refetches.
+PUC_CACHE_VERSION <- "local-day-v2"
+
+update_puc_hourly <- function(stations, counts = NULL, days = puc_sample_days()) {
   puc  <- stations[station_type == "puc", station_id]
   old  <- read_pq(cache_path("puc_hourly.parquet"))
   done <- read_pq(cache_path("puc_days_done.parquet"))
-  if (is.null(done)) done <- data.table(station_id = integer(), date = as.Date(character()))
+  # v1 caches sampled UTC days through the package filter (missing 4 h/day).
+  if (is.null(done) || !identical(PUC_CACHE_VERSION, done$version[1])) {
+    if (!is.null(done)) message("PUC cache format changed; refetching sampled days.")
+    old  <- NULL
+    done <- data.table(station_id = integer(), date = as.Date(character()), version = character())
+  }
+  first <- if (!is.null(counts)) counts[, .(first = min(date)), by = station_id] else NULL
   out <- list(old)
   for (sid in puc) {
     todo <- setdiff(days, done[station_id == sid, date])
     todo <- as.Date(todo, origin = "1970-01-01")
+    f <- first[station_id == sid, first]
+    if (length(f)) todo <- todo[todo >= f]
     message("PUC ", sid, ": ", length(todo), " sampled days to fetch")
     for (d in as.list(todo)) {
-      r <- with_retry(function() {
-        get_environment_data(
-          station_id = as.character(sid),
-          from = paste0(d, "T00:00:00.000Z"),
-          to   = paste0(d, "T23:59:59.000Z")
-        )
-      })
-      done <- rbindlist(list(done, data.table(station_id = as.integer(sid), date = d)))
+      r <- with_retry(function() fetch_env_day(sid, d))
+      done <- rbindlist(list(done, data.table(station_id = as.integer(sid), date = d, version = PUC_CACHE_VERSION)))
       if (!nrow(r)) next
-      r[, time := as.POSIXct(trunc(parse_ts(timestamp), "hours"))]
-      out[[length(out) + 1]] <- r[!is.na(temperature) & !is.na(time), .(
+      if (d == todo[length(todo)]) {
+        message(sprintf("  %s: %d readings, %s to %s UTC", d, nrow(r), min(r$ts), max(r$ts)))
+      }
+      r <- r[!is.na(temperature) & temperature >= PUC_TEMP_RANGE[1] & temperature <= PUC_TEMP_RANGE[2]]
+      if (!nrow(r)) next
+      r[, time := as.POSIXct(trunc(ts, "hours"))]
+      out[[length(out) + 1]] <- r[, .(
         station_id = as.integer(sid),
         temp       = mean(temperature),
         humidity   = mean(humidity, na.rm = TRUE),
@@ -221,7 +269,7 @@ update_puc_hourly <- function(stations, days = puc_sample_days()) {
     }
     # Checkpoint per station so an interrupted run resumes cleanly.
     p <- unique(rbindlist(out, use.names = TRUE), by = c("station_id", "time"), fromLast = TRUE)
-    setkey(p, station_id, time)
+    if (nrow(p)) setkey(p, station_id, time)
     write_pq(p, cache_path("puc_hourly.parquet"))
     write_pq(unique(done), cache_path("puc_days_done.parquet"))
     out <- list(p)
