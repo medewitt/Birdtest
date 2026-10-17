@@ -504,10 +504,11 @@ Ranks are computed over every species before the top-N filter, so a rank is the 
 
 **Temperature.** Line and band are ERA5 reanalysis daily mean, min, and max at the county centroid from the Open-Meteo archive (about 5 days of lag), smoothed with the same trailing window.
 Points are the mean across BirdWeather PUC stations of each station's local-day mean on-board sensor temperature, kept for days with at least 20 of 24 hours observed.
-PUC temperature is a stratified random subsample, `r PUC_DAYS_PER_MONTH` UTC days per month (seed 1834), shared by all stations, so points appear only on sampled days.
+PUC temperature is a stratified random subsample, `r PUC_DAYS_PER_MONTH` local calendar days per month (seed 1834), shared by all stations, so points appear only on sampled days.
 PUC sensors sit in an enclosure and can read warm in direct sun.
 
-**Microclimate.** Hourly PUC means (hours with at least 30 readings) are paired with ERA5-Land hourly 2 m temperature from Open-Meteo at each station's coordinates.
+**Microclimate.** Readings outside -30 to 50 °C are dropped as sensor faults or enclosure heating.
+Hourly PUC means (hours with at least 30 readings) are paired with ERA5-Land hourly 2 m temperature from Open-Meteo at each station's coordinates.
 Open-Meteo downscales ERA5-Land (about 9 km grid) to the point with a 90 m elevation model, so lapse-rate differences are already removed.
 ERA5 and ERA5-Land are reanalysis products (a weather model constrained by observations), not direct satellite measurements.
 The station delta is the mean over sampled days of the daily mean of PUC minus ERA5-Land within the selected hours.
