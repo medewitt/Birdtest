@@ -56,3 +56,6 @@ rsconnect/
 
 # uv
 /.venv/
+
+# Cache lives on the orphan "cache" branch (see .github/workflows/dashboard.yml)
+/data/cache/
