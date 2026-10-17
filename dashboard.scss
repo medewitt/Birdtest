@@ -1,3 +1,29 @@
+/*-- scss:defaults --*/
+
+// IDEEEP site tokens (medewitt/ideeep, assets/styles.css): Wake Forest black
+// and old gold, Nunito Sans, and the figure ink and link blue.
+$ideeep-ink: #26323f;
+$ideeep-muted: #5c6b7a;
+$ideeep-border: #e2e6ea;
+$ideeep-surface: #f6f7f9;
+$ideeep-accent: #8c6d2c;
+$ideeep-link: #2f6f9f;
+$ideeep-nav-bg: #12151a;
+$ideeep-nav-border: #2b323c;
+
+$font-family-sans-serif: 'Nunito Sans', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+$font-family-monospace: 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas, 'Courier New', monospace;
+$headings-font-weight: 700;
+$body-color: $ideeep-ink;
+$text-muted: $ideeep-muted;
+$border-color: $ideeep-border;
+$primary: $ideeep-link;
+$link-color: $ideeep-link;
+$light: $ideeep-surface;
+$navbar-bg: $ideeep-nav-bg;
+$navbar-fg: #ffffff;
+$navbar-hl: $ideeep-accent;
+
 /*-- scss:rules --*/
 
 // Let toolbar inputs and the summary line wrap instead of widening the page.
@@ -28,3 +54,31 @@
 .quarto-dashboard table.bw-eco td { vertical-align: middle; }
 .quarto-dashboard .bw-spark { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 1px; color: #0072B2; white-space: nowrap; }
 .quarto-dashboard img.bw-wnv { height: 1.15em; width: auto; vertical-align: -0.2em; margin-left: 0.15em; }
+
+// IDEEEP chrome: dark navbar with an old-gold rule and active-tab underline.
+.quarto-dashboard #quarto-dashboard-header .navbar { border-bottom: 3px solid $ideeep-accent; }
+.quarto-dashboard #quarto-dashboard-header .navbar .nav-link { font-weight: 700; border-bottom: 2px solid transparent; }
+.quarto-dashboard #quarto-dashboard-header .navbar .nav-link.active { color: $ideeep-accent; border-bottom-color: $ideeep-accent; }
+.quarto-dashboard .card-header { font-weight: 700; color: $ideeep-ink; }
+// Nunito Sans sets taller lines than the cosmo default; keep value boxes
+// inside their row now that the footer takes a strip of the viewport.
+.quarto-dashboard .bslib-value-box .value-box-title { margin-bottom: 0; }
+.quarto-dashboard .bslib-value-box .value-box-value { line-height: 1.1; }
+
+// Footer, adapted from the IDEEEP site footer (assets/footer.html).
+// Kept to a short strip so the non-scrolling dashboard keeps its chart space.
+.quarto-dashboard footer.basic-footer {
+  flex: 0 0 auto;
+  background: $ideeep-nav-bg;
+  color: rgba(255, 255, 255, 0.85);
+  border-top: 3px solid $ideeep-accent;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  padding: 0.4rem 1rem;
+  p { margin: 0; }
+  a { color: $ideeep-accent; }
+  a:hover { color: #d4af5a; }
+  .bw-brand { margin-bottom: 0.2rem; }
+  .bw-brand-mark { font-size: 1.15rem; font-weight: 600; margin-right: 0.5rem; white-space: nowrap; }
+  .bw-brand-name { font-size: 0.85rem; }
+}

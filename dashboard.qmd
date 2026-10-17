@@ -6,6 +6,8 @@ format:
     orientation: rows
     scrolling: false
     theme: [cosmo, dashboard.scss]
+    include-in-header: assets/head.html
+    include-after-body: assets/footer.html
 execute:
   echo: false
 ---

@@ -15,6 +15,9 @@ It shows species rank over time, normalized detection counts, and daily temperat
 | `data/species_status.csv` | Curated residency status, note, and source DOI for the Local ecology table |
 | `data/wnv_bird_species_cdc_1999_2016.csv` | CDC list of dead-bird species with West Nile virus detected, US 1999-2016 (332 species) |
 | `assets/mosquito.png` | Icon marking WNV-listed species in the Local ecology table |
+| `assets/footer.html` | IDEAS footer, adapted from the IDEEEP site (`medewitt/ideeep`) |
+| `assets/head.html`, `assets/fonts/` | Self-hosted Nunito Sans (SIL OFL 1.1), as on the IDEEEP site |
+| `dashboard.scss` | Theme: IDEEEP colors (ink, old gold, dark navbar), phone layout, table styles |
 | `data/cache/` | Parquet cache |
 
 ## Run
