@@ -48,3 +48,8 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# Quarto render output
+/dashboard.html
+/dashboard_files/
+/.quarto/
