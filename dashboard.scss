@@ -1,0 +1,23 @@
+/*-- scss:rules --*/
+
+// Let toolbar inputs and the summary line wrap instead of widening the page.
+.quarto-dashboard .toolbar .cell-output-display { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+.quarto-dashboard .toolbar .cell-output-display > * { min-width: 0; max-width: 100%; }
+.quarto-dashboard .toolbar form { flex-wrap: wrap; max-width: 100%; }
+
+// Phone layout. Quarto sizes OJS plots from their cell's clientHeight, which
+// is 0 on narrow screens where cards size to content, so give chart cells a floor.
+@media (max-width: 767.98px) {
+  .quarto-dashboard .card div[id^="ojs-cell-"]:has(svg.bw-chart) { min-height: 300px; }
+  .quarto-dashboard .card div[id^="ojs-cell-"]:has(svg.bw-strip) { min-height: 64px; }
+
+  // Compact value boxes, two per row, so the charts start on the first screen.
+  .quarto-dashboard .bslib-grid:has(> .bslib-value-box) {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 0.5rem !important;
+  }
+  .quarto-dashboard .bslib-value-box { min-height: 0 !important; }
+  .quarto-dashboard .bslib-value-box .value-box-area { padding: 0.4rem 0.7rem !important; }
+  .quarto-dashboard .bslib-value-box .value-box-title { font-size: 0.8rem; margin: 0; }
+  .quarto-dashboard .bslib-value-box .value-box-value { font-size: 1.35rem; }
+}
