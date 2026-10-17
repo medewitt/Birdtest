@@ -601,7 +601,7 @@ htmltools::div(class = "bw-table-wrap",
 
 ::: {.card title="How to read this table"}
 **Status** is the usual pattern for the North Carolina Piedmont.
-*Local*: present year-round and essentially non-migratory.
+*Resident*: present year-round and essentially non-migratory.
 *Migratory*: present only seasonally.
 *Both*: present year-round, with migrants from farther north joining or replacing local birds in winter.
 
