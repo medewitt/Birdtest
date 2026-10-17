@@ -7,10 +7,13 @@ CACHE_DIR <- Sys.getenv("BW_CACHE_DIR", "data/cache")
 HISTORY_START <- as.Date("2021-01-01")  # earlier than any BirdWeather station
 TZ_LOCAL <- "America/New_York"
 
-# Forsyth County, NC boundary from maps::county (39 vertices, ~1 km precision).
+# PUC temperature subsample: days per calendar month (Inf = every day).
+PUC_DAYS_PER_MONTH <- as.numeric(Sys.getenv("BW_PUC_DAYS_PER_MONTH", "4"))
+
+# Forsyth County, NC boundary from maps::county (closed 29-vertex ring, ~1 km precision).
 # The bbox is used for the API query; the polygon refines station membership.
 forsyth_polygon <- function() {
-  m <- maps::map("county", "north carolina,forsyth", plot = FALSE)
+  m <- maps::map("county", "north carolina,forsyth", plot = FALSE, fill = TRUE)
   ok <- !is.na(m$x)
   data.table::data.table(lon = m$x[ok], lat = m$y[ok])
 }

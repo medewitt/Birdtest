@@ -11,7 +11,8 @@ stations <- update_stations()
 counts   <- update_counts(stations)
 species  <- update_species(counts)
 weather  <- update_weather()
-puc      <- update_puc_temp(stations)
+puc      <- update_puc_hourly(stations)
+era5_h   <- update_era5_hourly(stations, puc)
 
 sz <- sum(file.size(list.files(CACHE_DIR, recursive = TRUE, full.names = TRUE)))
 message(sprintf(

@@ -24,7 +24,8 @@ read_cache <- function() {
     species  = rp(file.path(CACHE_DIR, "species.parquet")),
     stations = rp(file.path(CACHE_DIR, "stations.parquet")),
     weather  = rp(file.path(CACHE_DIR, "weather_era5.parquet")),
-    puc      = rp(file.path(CACHE_DIR, "puc_temp.parquet"))
+    puc      = rp(file.path(CACHE_DIR, "puc_hourly.parquet")),
+    era5_h   = rp(file.path(CACHE_DIR, "era5_hourly.parquet"))
   )
 }
 
@@ -70,9 +71,7 @@ build_payload <- function(cache = read_cache()) {
   rank_cols <- paste0("r", WINDOWS)
 
   weather <- cache$weather[data.table(date = days), on = "date"]
-  puc <- if (!is.null(cache$puc) && nrow(cache$puc)) {
-    cache$puc[n >= 500, .(puc_tmean = mean(tmean), puc_n = .N), by = date]
-  } else data.table(date = as.Date(character()), puc_tmean = numeric(), puc_n = integer())
+  puc <- puc_daily(cache$puc)[, .(puc_tmean = mean(tmean), puc_n = .N), by = date]
   weather <- puc[weather, on = "date"]
 
   list(
@@ -97,6 +96,52 @@ build_payload <- function(cache = read_cache()) {
       tmean = round(weather$tmean, 1),
       tmax  = round(weather$tmax, 1),
       puc_tmean = round(weather$puc_tmean, 1)
-    )
+    ),
+    micro = build_micro(cache)
+  )
+}
+
+# Local-day PUC means, kept only for days with >= 20 of 24 hours observed.
+puc_daily <- function(puc) {
+  if (is.null(puc) || !nrow(puc)) {
+    return(data.table(station_id = integer(), date = as.Date(character()), tmean = numeric()))
+  }
+  p <- copy(puc)[, date := as.Date(time, tz = TZ_LOCAL)]
+  p[, .(tmean = mean(temp), hours = .N), by = .(station_id, date)][hours >= 20L, !"hours"]
+}
+
+# Microclimate payload: hourly PUC vs ERA5-Land at each PUC station.
+# Temperatures are shipped as integer tenths of a degree C.
+build_micro <- function(cache) {
+  if (is.null(cache$era5_h) || !nrow(cache$era5_h)) return(NULL)
+  h <- cache$era5_h[cache$puc, on = .(station_id, time), nomatch = NULL]
+  h <- h[n >= 30L & !is.na(era5)]  # >= ~20 min of readings in the hour
+  lt <- as.POSIXlt(h$time, tz = TZ_LOCAL)
+  h[, `:=`(
+    hour  = lt$hour,
+    month = lt$mon + 1L,
+    day   = as.integer(as.Date(time, tz = "UTC"))  # sampled unit, used as bootstrap block
+  )]
+  st <- cache$stations[station_id %in% h$station_id,
+                       .(station_id, station_name, station_lat, station_lon)]
+  st <- unique(h[, .(station_id, elevation)], by = "station_id")[st, on = "station_id"]
+  st[, n_days := h[, uniqueN(day), by = station_id][st, on = "station_id", V1]]
+  setorder(st, station_id)
+  st[, idx := .I - 1L]
+  h <- st[, .(station_id, idx)][h, on = "station_id"]
+  setorder(h, idx, time)
+  poly <- forsyth_polygon()
+  list(
+    stations = st[, .(idx, station_id, name = station_name, lat = station_lat,
+                      lon = station_lon, elevation, n_days)],
+    hourly = list(
+      s     = h$idx,
+      day   = h$day,
+      hour  = h$hour,
+      month = h$month,
+      puc   = as.integer(round(10 * h$temp)),
+      era5  = as.integer(round(10 * h$era5))
+    ),
+    outline = list(lon = round(poly$lon, 4), lat = round(poly$lat, 4))
   )
 }
