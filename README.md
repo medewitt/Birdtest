@@ -34,7 +34,10 @@ A raw detection row from `get_detections()` has 21 mostly-string columns, and pu
 Files are zstd-compressed Parquet written with `nanoparquet`, which has no compiled dependencies beyond its own sources.
 Counts are partitioned by year in `data/cache/counts/<year>.parquet`.
 In testing, 1.1 million count rows took 1.1 MB on disk.
-PUC sensor readings (about one every 42 s) are reduced to daily min, mean, and max per station as they arrive, and raw readings are never stored.
+PUC sensor readings (about one every 42 s) are pulled on a stratified random subsample of days, 4 UTC days per calendar month by default (`BW_PUC_DAYS_PER_MONTH`, `Inf` for all days).
+The sample is seeded from (1834, year, month), so it is stable across runs and shared by all stations.
+Each sampled day is pulled in full and reduced to hourly means before writing; raw readings are never stored.
+ERA5-Land hourly temperature at each PUC station's coordinates comes from the Open-Meteo archive for the same hours.
 
 Each update refetches the last 7 days per station and replaces those station-days whole, so late uploads and dropped species are handled.
 
@@ -44,4 +47,5 @@ See the Methods page of the dashboard.
 In short, rank is the county-wide competition rank of the trailing-window detection sum.
 Normalized count is either the share of all detections or detections per active station-day.
 Temperature is ERA5 daily mean, min, and max at the county centroid (Open-Meteo), with BirdWeather PUC on-board sensor daily means overlaid.
+The Microclimate page compares each PUC station with ERA5-Land at its own location, with day-block bootstrap intervals, the delta by hour of day, and between-station spread compared with ERA5-Land spread.
 Detections measure vocal activity weighted by detectability, not abundance.

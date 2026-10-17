@@ -6,7 +6,9 @@
 #   progress.parquet           station_id, fetched_through
 #   species.parquet            species_id, common_name, scientific_name
 #   weather_era5.parquet       date, tmin, tmean, tmax (deg C, Open-Meteo ERA5)
-#   puc_temp.parquet           station_id, date, tmin, tmean, tmax, n
+#   puc_hourly.parquet         station_id, time (UTC hour), temp, humidity, n
+#   puc_days_done.parquet      station_id, date (sampled UTC days already fetched)
+#   era5_hourly.parquet        station_id, time, era5 (deg C, ERA5-Land), elevation
 #
 # Detections are cached as server-side daily species counts, not raw rows.
 # A raw detection is ~21 columns of strings; a daily count is 4 integers.
@@ -157,37 +159,101 @@ update_weather <- function(from = HISTORY_START, to = Sys.Date()) {
 }
 
 # ---------------------------------------------------------------------------
-# PUC on-board temperature, aggregated to local-day summaries on the fly.
-# Raw readings (~2,000/day/station) are never written to disk.
+# PUC on-board temperature on a stratified random subsample of days.
+#
+# Each calendar month gets PUC_DAYS_PER_MONTH days drawn with a seed derived
+# from (SEED, year, month), so the sample is stable across runs and shared by
+# all stations (paired comparisons). Sampled days are UTC calendar days, the
+# unit the API resolves periods to, and each is pulled in full so diurnal
+# cycles are complete. Raw readings (~2,000/day/station) are reduced to
+# hourly means before anything is written.
 # ---------------------------------------------------------------------------
-update_puc_temp <- function(stations, today = Sys.Date(), overlap = 3L) {
-  puc <- stations[station_type == "puc", station_id]
-  old <- read_pq(cache_path("puc_temp.parquet"))
+puc_sample_days <- function(from = HISTORY_START, to = Sys.Date() - 1L,
+                            k = PUC_DAYS_PER_MONTH) {
+  months <- seq(as.Date(format(from, "%Y-%m-01")), to, by = "month")
+  days <- lapply(months, function(m) {
+    d <- seq(m, seq(m, by = "month", length.out = 2)[2] - 1L, by = "day")
+    if (is.finite(k) && k < length(d)) {
+      set.seed(SEED + as.integer(format(m, "%Y")) * 12L + as.integer(format(m, "%m")))
+      d <- sort(sample(d, k))
+    }
+    d
+  })
+  d <- do.call(c, days)
+  d[d >= from & d <= to]
+}
+
+# ISO8601 with Z or +HH:MM offset -> POSIXct UTC.
+parse_ts <- function(x) {
+  x <- sub("Z$", "+0000", x)
+  x <- sub("([+-]\\d{2}):(\\d{2})$", "\\1\\2", x)
+  x <- sub("\\.\\d+([+-])", "\\1", x)
+  as.POSIXct(x, format = "%Y-%m-%dT%H:%M:%S%z", tz = "UTC")
+}
+
+update_puc_hourly <- function(stations, days = puc_sample_days()) {
+  puc  <- stations[station_type == "puc", station_id]
+  old  <- read_pq(cache_path("puc_hourly.parquet"))
+  done <- read_pq(cache_path("puc_days_done.parquet"))
+  if (is.null(done)) done <- data.table(station_id = integer(), date = as.Date(character()))
   out <- list(old)
   for (sid in puc) {
-    last <- if (is.null(old)) NULL else old[station_id == sid, max(date)]
-    from <- if (length(last) && is.finite(last)) last - overlap else HISTORY_START
-    for (s in as.list(seq(from, today, by = "month"))) {
-      e <- min(seq(s, by = "month", length.out = 2)[2] - 1, today)
+    todo <- setdiff(days, done[station_id == sid, date])
+    todo <- as.Date(todo, origin = "1970-01-01")
+    message("PUC ", sid, ": ", length(todo), " sampled days to fetch")
+    for (d in as.list(todo)) {
       r <- with_retry(function() {
-        get_environment_data(station_id = as.character(sid), from = s, to = e)
+        get_environment_data(
+          station_id = as.character(sid),
+          from = paste0(d, "T00:00:00.000Z"),
+          to   = paste0(d, "T23:59:59.000Z")
+        )
       })
+      done <- rbindlist(list(done, data.table(station_id = as.integer(sid), date = d)))
       if (!nrow(r)) next
-      r[, date := as.Date(as.POSIXct(timestamp, format = "%Y-%m-%dT%H:%M:%S", tz = "UTC"), tz = TZ_LOCAL)]
-      out[[length(out) + 1]] <- r[!is.na(temperature), .(
+      r[, time := as.POSIXct(trunc(parse_ts(timestamp), "hours"))]
+      out[[length(out) + 1]] <- r[!is.na(temperature) & !is.na(time), .(
         station_id = as.integer(sid),
-        tmin  = min(temperature),
-        tmean = mean(temperature),
-        tmax  = max(temperature),
-        n     = .N
-      ), by = date]
+        temp       = mean(temperature),
+        humidity   = mean(humidity, na.rm = TRUE),
+        n          = .N
+      ), by = time]
     }
+    # Checkpoint per station so an interrupted run resumes cleanly.
+    p <- unique(rbindlist(out, use.names = TRUE), by = c("station_id", "time"), fromLast = TRUE)
+    setkey(p, station_id, time)
+    write_pq(p, cache_path("puc_hourly.parquet"))
+    write_pq(unique(done), cache_path("puc_days_done.parquet"))
+    out <- list(p)
   }
-  p <- rbindlist(out, use.names = TRUE)
-  if (!nrow(p)) return(p)
-  # Later fetches win for overlapping days.
-  p <- p[, .SD[.N], by = .(station_id, date)]
-  setkey(p, station_id, date)
-  write_pq(p, cache_path("puc_temp.parquet"))
-  p
+  out[[1]]
+}
+
+# ---------------------------------------------------------------------------
+# ERA5-Land hourly 2 m temperature at each PUC station's coordinates.
+# Open-Meteo downscales to the point using a 90 m DEM, so the reference is
+# already corrected to station elevation (returned as `elevation`).
+# ---------------------------------------------------------------------------
+update_era5_hourly <- function(stations, puc_hourly) {
+  if (is.null(puc_hourly) || !nrow(puc_hourly)) return(NULL)
+  rng <- puc_hourly[, .(from = as.Date(min(time)), to = as.Date(max(time))), by = station_id]
+  st  <- stations[rng, on = "station_id"]
+  res <- lapply(seq_len(nrow(st)), function(i) {
+    url <- sprintf(paste0(
+      "https://archive-api.open-meteo.com/v1/archive?latitude=%.5f&longitude=%.5f",
+      "&start_date=%s&end_date=%s&hourly=temperature_2m&models=era5_land&timezone=GMT"
+    ), st$station_lat[i], st$station_lon[i], st$from[i], st$to[i])
+    j <- with_retry(function() jsonlite::fromJSON(url))
+    Sys.sleep(0.5)
+    data.table(
+      station_id = st$station_id[i],
+      time       = as.POSIXct(j$hourly$time, format = "%Y-%m-%dT%H:%M", tz = "UTC"),
+      era5       = j$hourly$temperature_2m,
+      elevation  = j$elevation
+    )
+  })
+  e <- rbindlist(res)[puc_hourly[, .(station_id, time)], on = .(station_id, time), nomatch = NULL]
+  setkey(e, station_id, time)
+  write_pq(e, cache_path("era5_hourly.parquet"))
+  e
 }

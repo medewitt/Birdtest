@@ -303,6 +303,182 @@ tempRows = {
 }
 ```
 
+# Microclimate
+
+## {.sidebar}
+
+```{ojs}
+viewof mHoursKey = Inputs.radio(["Night (00-05 local)", "Afternoon (12-17 local)", "All hours"], {
+  label: "Hours", value: "Night (00-05 local)"
+})
+viewof mSeasonKey = Inputs.radio(["All", "Winter (DJF)", "Spring (MAM)", "Summer (JJA)", "Fall (SON)"], {
+  label: "Season", value: "All"
+})
+```
+
+Each PUC station is compared with ERA5-Land at its own coordinates, which Open-Meteo downscales to station elevation.
+Delta is PUC minus ERA5-Land, in °C (multiply by 1.8 for °F).
+Night hours are the cleaner microclimate signal.
+Afternoon deltas also include sun heating of the PUC enclosure.
+Intervals are 95% bootstrap intervals that resample whole sampled days (B = 1000, seed 1834).
+
+```{ojs}
+micro ? html`<p><b>Summary for this selection.</b>
+SD of station mean deltas: ${d3.format(".2f")(spread.between)} °C across ${mStats.length} stations.
+Median daily between-station SD: PUC ${d3.format(".2f")(d3.median(spread.days, d => d.sdPuc))} °C,
+ERA5-Land ${d3.format(".2f")(d3.median(spread.days, d => d.sdEra))} °C.</p>` : html``
+```
+
+## Column
+
+### Row {height="55%"}
+
+```{ojs}
+//| title: "Mean delta by station (PUC minus ERA5-Land, °C)"
+micro ? Plot.plot({
+  projection: { type: "mercator", domain: { type: "MultiPoint", coordinates: outline }, inset: 20 },
+  color: { type: "diverging", scheme: "PuOr", reverse: true, pivot: 0, domain: [-dMax, dMax], legend: true, label: "Mean delta (°C)" },
+  marks: [
+    Plot.line(outline, { x: d => d[0], y: d => d[1], stroke: "#777" }),
+    Plot.dot(mStats, { x: "lon", y: "lat", r: 9, fill: "mean", stroke: "#222", tip: true,
+      title: d => `${d.name}\nmean delta ${fmt1(d.mean)} °C [${fmt1(d.lo)}, ${fmt1(d.hi)}]\n${d.nDays} sampled days\nelevation ${d.elevation} m` }),
+    Plot.text(mStats, { x: "lon", y: "lat", text: "name", dy: -16, fontSize: 11 })
+  ]
+}) : html`<p>No PUC stations with sensor data.</p>`
+```
+
+```{ojs}
+//| title: "Station delta with 95% day-block bootstrap interval"
+micro ? Plot.plot({
+  marginLeft: 140,
+  x: { label: "PUC minus ERA5-Land (°C)", grid: true },
+  y: { label: null, domain: [...mStats].sort((a, b) => a.mean - b.mean).map(d => d.name) },
+  marks: [
+    Plot.ruleX([0], { stroke: "#999" }),
+    Plot.ruleY(mStats, { y: "name", x1: "lo", x2: "hi", stroke: "#0072B2", strokeWidth: 2 }),
+    Plot.dot(mStats, { y: "name", x: "mean", fill: "#0072B2", r: 4, tip: true,
+      title: d => `${d.name}\n${fmt1(d.mean)} °C [${fmt1(d.lo)}, ${fmt1(d.hi)}]\n${d.nDays} days` })
+  ]
+}) : html``
+```
+
+### Row {height="45%"}
+
+```{ojs}
+//| title: "Delta by local hour of day (selected season)"
+micro ? Plot.plot({
+  marginLeft: 50, marginRight: 110,
+  x: { label: "Local hour", domain: [0, 23], ticks: 12 },
+  y: { label: "Mean delta (°C)", grid: true },
+  marks: [
+    Plot.rect([mHours], { x1: d => d[0] - 0.5, x2: d => d[1] + 0.5, fill: "#000", fillOpacity: 0.06 }),
+    Plot.ruleY([0], { stroke: "#999" }),
+    Plot.line(diurnal, { x: "hour", y: "mean", z: "name", stroke: "#56B4E9", tip: true,
+      title: d => `${d.name}\n${d.hour}:00  ${fmt1(d.mean)} °C` }),
+    Plot.line(diurnal, Plot.groupX({ y: "median" }, { x: "hour", y: "mean", stroke: "#000", strokeWidth: 2.5 })),
+    Plot.text(diurnal, Plot.selectLast({ x: "hour", y: "mean", z: "name", text: "name", dx: 4, textAnchor: "start", fontSize: 10 }))
+  ]
+}) : html``
+```
+
+```{ojs}
+//| title: "Spread across stations per sampled day: PUC vs ERA5-Land (SD, °C)"
+micro ? Plot.plot({
+  marginLeft: 50,
+  x: { label: null, type: "utc" },
+  y: { label: "Between-station SD (°C)", grid: true, zero: true },
+  color: { legend: true, domain: ["PUC", "ERA5-Land"], range: ["#D55E00", "#0072B2"] },
+  marks: [
+    Plot.dot(spread.days, { x: "date", y: "sdPuc", fill: "#D55E00", r: 2, tip: true,
+      title: d => `${d.date.toISOString().slice(0, 10)}\nPUC SD ${fmt1(d.sdPuc)}\nERA5-Land SD ${fmt1(d.sdEra)}\n${d.n} stations` }),
+    Plot.dot(spread.days, { x: "date", y: "sdEra", fill: "#0072B2", r: 2 })
+  ]
+}) : html`<p>Needs at least 3 PUC stations.</p>`
+```
+
+```{ojs}
+//| output: false
+// ---------------------------------------------------------------------------
+// Microclimate data and day-block bootstrap
+// ---------------------------------------------------------------------------
+micro = bw.micro
+
+mHours = {
+  const m = { "Night (00-05 local)": [0, 5], "Afternoon (12-17 local)": [12, 17], "All hours": [0, 23] };
+  return m[mHoursKey];
+}
+mSeason = {
+  const m = {
+    "All": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], "Winter (DJF)": [12, 1, 2],
+    "Spring (MAM)": [3, 4, 5], "Summer (JJA)": [6, 7, 8], "Fall (SON)": [9, 10, 11]
+  };
+  return m[mSeasonKey];
+}
+
+fmt1 = d3.format("+.1f")
+outline = micro ? micro.outline.lon.map((x, i) => [x, micro.outline.lat[i]]) : []
+mSt = micro ? transpose(micro.stations) : []
+
+// Rows passing the hour and season filters, delta in deg C.
+mRows = {
+  if (!micro) return [];
+  const h = micro.hourly, [h0, h1] = mHours, out = [];
+  for (let i = 0; i < h.s.length; i++) {
+    if (h.hour[i] < h0 || h.hour[i] > h1 || !mSeason.includes(h.month[i])) continue;
+    out.push({ s: h.s[i], day: h.day[i], hour: h.hour[i], puc: h.puc[i] / 10, era: h.era5[i] / 10 });
+  }
+  return out;
+}
+
+// Station-day means; a day counts if it has at least half the selected hours.
+stationDays = {
+  const need = Math.ceil((mHours[1] - mHours[0] + 1) / 2);
+  const g = d3.rollup(mRows, v => v.length >= need
+    ? { puc: d3.mean(v, d => d.puc), era: d3.mean(v, d => d.era), delta: d3.mean(v, d => d.puc - d.era) }
+    : null, d => d.s, d => d.day);
+  const out = [];
+  for (const [s, days] of g) for (const [day, v] of days) if (v) out.push({ s, day, ...v });
+  return out;
+}
+
+mStats = {
+  const rng = d3.randomLcg(1834), B = 1000;
+  return d3.groups(stationDays, d => d.s).map(([s, v]) => {
+    const x = v.map(d => d.delta), n = x.length, boot = new Float64Array(B);
+    for (let b = 0; b < B; b++) {
+      let t = 0;
+      for (let i = 0; i < n; i++) t += x[Math.floor(rng() * n)];
+      boot[b] = t / n;
+    }
+    const st = mSt.find(d => d.idx === s);
+    return { ...st, mean: d3.mean(x), lo: d3.quantile(boot, 0.025), hi: d3.quantile(boot, 0.975), nDays: n };
+  });
+}
+
+dMax = Math.max(0.5, d3.max(mStats, d => Math.abs(d.mean)) ?? 0.5)
+
+diurnal = {
+  if (!micro) return [];
+  const h = micro.hourly, acc = new Map();
+  for (let i = 0; i < h.s.length; i++) {
+    if (!mSeason.includes(h.month[i])) continue;
+    const k = h.s[i] * 24 + h.hour[i], a = acc.get(k) ?? [0, 0];
+    a[0] += (h.puc[i] - h.era5[i]) / 10; a[1]++; acc.set(k, a);
+  }
+  return [...acc].map(([k, [t, n]]) => ({ name: mSt[Math.floor(k / 24)].name, hour: k % 24, mean: t / n }))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.hour - b.hour);
+}
+
+// Per sampled day: SD across stations of PUC and of ERA5-Land station means.
+// spread.between is the SD of station mean deltas.
+spread = {
+  const days = d3.groups(stationDays, d => d.day)
+    .filter(([, v]) => v.length >= 3)
+    .map(([day, v]) => ({ date: new Date(day * 864e5), n: v.length, sdPuc: d3.deviation(v, d => d.puc), sdEra: d3.deviation(v, d => d.era) }));
+  return { days, between: mStats.length >= 2 ? d3.deviation(mStats, d => d.mean) : NaN };
+}
+```
+
 # Methods
 
 ## Row
@@ -311,7 +487,7 @@ tempRows = {
 
 ::: {.card title="Data and definitions"}
 **Source.** BirdWeather station detections (BirdNET classifier) pulled with the `birdweatheR` R package.
-Stations are those whose public coordinates fall inside the Forsyth County, NC boundary from `maps::county` (39-vertex polygon, about 1 km precision).
+Stations are those whose public coordinates fall inside the Forsyth County, NC boundary from `maps::county` (29-vertex polygon, about 1 km precision).
 Stations with location privacy enabled report fuzzed coordinates and may be misassigned near the county line.
 
 **Counts.** Server-side daily species counts per station (`dailyDetectionCounts`), summed across stations.
@@ -327,8 +503,18 @@ Ranks are computed over every species before the top-N filter, so a rank is the 
 *Per active station-day* divides by the number of station-days with at least one detection, which assumes stations that are online but silent are rare.
 
 **Temperature.** Line and band are ERA5 reanalysis daily mean, min, and max at the county centroid from the Open-Meteo archive (about 5 days of lag), smoothed with the same trailing window.
-Points are the mean across BirdWeather PUC stations of each station's daily mean on-board sensor temperature, kept only for days with at least 500 readings (about 25% of a full day).
+Points are the mean across BirdWeather PUC stations of each station's local-day mean on-board sensor temperature, kept for days with at least 20 of 24 hours observed.
+PUC temperature is a stratified random subsample, `r PUC_DAYS_PER_MONTH` UTC days per month (seed 1834), shared by all stations, so points appear only on sampled days.
 PUC sensors sit in an enclosure and can read warm in direct sun.
+
+**Microclimate.** Hourly PUC means (hours with at least 30 readings) are paired with ERA5-Land hourly 2 m temperature from Open-Meteo at each station's coordinates.
+Open-Meteo downscales ERA5-Land (about 9 km grid) to the point with a 90 m elevation model, so lapse-rate differences are already removed.
+ERA5 and ERA5-Land are reanalysis products (a weather model constrained by observations), not direct satellite measurements.
+The station delta is the mean over sampled days of the daily mean of PUC minus ERA5-Land within the selected hours.
+Intervals resample whole sampled days, which keeps within-day autocorrelation.
+A station delta mixes real microclimate (tree cover, pavement, cold-air pooling in valleys) with sensor offset and enclosure heating, and the two cannot be separated without a co-located reference thermometer.
+Night deltas are less affected by sun heating, so between-station differences at night are the better microclimate estimate.
+The spread panel compares how much stations differ on the same day with how much ERA5-Land differs at the same points; a PUC spread well above the ERA5-Land spread means local variation that the reanalysis does not resolve.
 
 **Assumptions that can fail.** Station effort is not constant (stations join, go offline, and move).
 Detection probability varies by species, distance, and background noise, so ranks compare detectability-weighted activity, not abundance.
