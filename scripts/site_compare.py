@@ -21,7 +21,21 @@ offline days and are dropped.
 
    a[s,w] absorbs effort and the site's overall rate, so u[j,s] is the log
    ratio of species j's share of detections at site s to its cross-site
-   mean (soft-centred by the zero-mean prior).
+   mean. u sums to zero over sites and m over species within each month,
+   which removes the additive trade-offs among a, m and u.
+
+2b. Species composition, month-varying site effect. Model 2 plus
+
+       log mu += v[j,s,month],  v = sigma_v[j] * zv,  zv ~ N(0, 1)
+
+   Model 2 holds each species' site difference fixed across months, and the
+   seasonal term m[j,month] is shared by all sites. Model 2b lets the site
+   difference change by month, partially pooled toward u[j,s]. sigma_v[j]
+   (month-to-month SD of the site effect) is compared with tau[j] (SD of the
+   average site effect). The two models are compared with PSIS-LOO (ArviZ)
+   and with a targeted predictive check: 90 % interval coverage of the
+   observed monthly log2 share ratio (share among the N_TOP species, centred
+   across sites) for each species-site-month with >= 100 detections.
 
 3. Weather response. Daily total T[s,d] on active days:
 
@@ -47,7 +61,7 @@ Assumptions and caveats
   not used because PUC and ERA5-Land station series cover only the sampled
   days (see the Microclimate page).
 
-Checks: divergences and r-hat are printed; posterior predictive 90 %
+Checks: divergences, r-hat and ESS (on identified quantities) are printed; posterior predictive 90 %
 interval coverage and zero fraction are written to checks.csv.
 
 Run: uv run --group analysis python scripts/site_compare.py
@@ -57,6 +71,7 @@ Outputs go to output/site_compare/ (CSV tables and PNG figures).
 import os
 from pathlib import Path
 
+import arviz as az
 import jax
 import jax.numpy as jnp
 import matplotlib
@@ -67,7 +82,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 from numpyro.diagnostics import summary
-from numpyro.infer import MCMC, NUTS, Predictive
+from numpyro.infer import MCMC, NUTS, Predictive, log_likelihood
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
@@ -76,9 +91,15 @@ SEED = 1834
 STATIONS = [9883, 17755, 20422, 21599, 21688]
 WINDOW_START = np.datetime64("2026-01-03")
 N_TOP = 25            # species in the composition model
+MIN_MONTH = 100       # species-month detections (all sites) for the monthly check
+N_MONTH_PANELS = 12   # species shown in share_by_month.png
+MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+OKABE_ITO = ["#E69F00", "#56B4E9", "#009E73", "#0072B2", "#D55E00", "#CC79A7"]
 BLOCK = 14            # days per bootstrap block for the raw correlations
 B = 500               # bootstrap resamples
-CHAINS, WARMUP, SAMPLES = 4, 1000, 1000
+CHAINS = 4
+WARMUP = int(os.environ.get("BW_WARMUP", "1000"))
+SAMPLES = int(os.environ.get("BW_SAMPLES", "1000"))
 TARGET_ACCEPT = float(os.environ.get("BW_TARGET_ACCEPT", "0.95"))
 
 CACHE_DIR = Path(os.environ.get("BW_CACHE_DIR", "data/cache"))
@@ -138,14 +159,40 @@ def m_overall(day_idx, st_idx, n_day, n_st, y=None):
     numpyro.sample("y", dist.NegativeBinomial2(jnp.exp(eta), 1 / phi_inv), obs=y)
 
 
-def m_share(sp, st, sw, mo, J, S, K, y=None):
-    a = numpyro.sample("a", dist.Normal(5, 5).expand([K]))
-    m = numpyro.sample("m", dist.Normal(0, 3).expand([J, 12]))
+def share_effects(J, S):
+    """Species-month and species-site effects shared by models 2 and 2b.
+    m sums to zero over species within a month (else confounded with the
+    station-week intercept a); u sums to zero over sites (else confounded with
+    m), rescaled so each element keeps marginal SD tau."""
+    m_raw = numpyro.sample("m_raw", dist.Normal(0, 3).expand([J, 12]))
+    m = numpyro.deterministic("m", m_raw - m_raw.mean(0, keepdims=True))
     z = numpyro.sample("z", dist.Normal(0, 1).expand([J, S]))
     tau = numpyro.sample("tau", dist.HalfNormal(1).expand([J]))
-    u = numpyro.deterministic("u", tau[:, None] * z)
+    zc = (z - z.mean(1, keepdims=True)) * jnp.sqrt(S / (S - 1))
+    u = numpyro.deterministic("u", tau[:, None] * zc)
+    return m, u, tau
+
+
+def m_share(sp, st, sw, mo, J, S, K, y=None):
+    a = numpyro.sample("a", dist.Normal(5, 5).expand([K]))
+    m, u, tau = share_effects(J, S)
     phi_inv = numpyro.sample("phi_inv", dist.Exponential(1))
     eta = a[sw] + m[sp, mo] + u[sp, st]
+    numpyro.sample("y", dist.NegativeBinomial2(jnp.exp(eta), 1 / phi_inv), obs=y)
+
+
+def m_share_month(sp, st, sw, mo, mi, J, S, K, M, y=None):
+    a = numpyro.sample("a", dist.Normal(5, 5).expand([K]))
+    m, u, tau = share_effects(J, S)
+    zv = numpyro.sample("zv", dist.Normal(0, 1).expand([J, S, M]))
+    sigma_v = numpyro.sample("sigma_v", dist.HalfNormal(0.5).expand([J]))
+    # Sum to zero over sites (else confounded with m) and over months (else
+    # with u); rescaled so each element keeps marginal SD sigma_v.
+    zc = zv - zv.mean(1, keepdims=True) - zv.mean(2, keepdims=True) + zv.mean((1, 2), keepdims=True)
+    zc = zc * jnp.sqrt(S / (S - 1) * M / (M - 1))
+    v = numpyro.deterministic("v", sigma_v[:, None, None] * zc)
+    phi_inv = numpyro.sample("phi_inv", dist.Exponential(1))
+    eta = a[sw] + m[sp, mo] + u[sp, st] + v[sp, st, mi]
     numpyro.sample("y", dist.NegativeBinomial2(jnp.exp(eta), 1 / phi_inv), obs=y)
 
 
@@ -164,6 +211,9 @@ def m_weather(st, sw, dT, dH, S, K, y=None):
     numpyro.sample("y", dist.NegativeBinomial2(jnp.exp(eta), 1 / phi_inv), obs=y)
 
 
+UNIDENTIFIED = {"m_raw", "z", "zv"}
+
+
 def fit(model, key, **data):
     mcmc = MCMC(NUTS(model, target_accept_prob=TARGET_ACCEPT),
                 num_warmup=WARMUP, num_samples=SAMPLES, num_chains=CHAINS,
@@ -171,16 +221,59 @@ def fit(model, key, **data):
     mcmc.run(key, extra_fields=("diverging",), **data)
     post = mcmc.get_samples(group_by_chain=True)
     div = int(mcmc.get_extra_fields()["diverging"].sum())
-    rhat = max(float(np.nanmax(v["r_hat"])) for v in summary(post).values())
-    ess = min(float(np.nanmin(v["n_eff"])) for v in summary(post).values())
-    print(f"  {model.__name__}: divergences={div}, max r-hat={rhat:.3f}, min ESS={ess:.0f}")
+    # raw parameters with a sum-to-zero projection have an unidentified
+    # direction; judge convergence on the identified quantities instead
+    summ = {k: v for k, v in summary(post).items() if k not in UNIDENTIFIED}
+    rhat = max(float(np.nanmax(v["r_hat"])) for v in summ.values())
+    ess = min(float(np.nanmin(v["n_eff"])) for v in summ.values())
+    worst = sorted(((float(np.nanmax(v["r_hat"])), k) for k, v in summ.items()), reverse=True)[:3]
+    print(f"  {model.__name__}: divergences={div}, max r-hat={rhat:.3f}, min ESS={ess:.0f}"
+          f" (worst: {', '.join(f'{k} {r:.3f}' for r, k in worst)})")
     flat = {k: np.asarray(v).reshape(-1, *v.shape[2:]) for k, v in post.items()}
+    flat["_chains"] = CHAINS
     return flat, dict(model=model.__name__, divergences=div, max_rhat=rhat, min_ess=ess)
+
+
+def draws(post):
+    return {k: v for k, v in post.items() if not k.startswith("_")}
+
+
+def loo(model, post, **data):
+    ll = np.asarray(log_likelihood(model, draws(post), **data)["y"])
+    ll = ll.reshape(post["_chains"], -1, ll.shape[-1])
+    return az.loo(az.from_dict({"posterior": {"phi_inv": post["phi_inv"].reshape(ll.shape[:2])},
+                                "log_likelihood": {"y": ll}}))
+
+
+def month_share_ppc(model, key, post, Ymat, st_k, mo_k, n_draws=1000, **data):
+    """Coverage of the observed monthly log2 share ratio (among the modelled
+    species, centred across sites) by its 90 % posterior predictive interval."""
+    sub = {k: v[:: max(1, len(v) // n_draws)] for k, v in draws(post).items()}
+    rep = np.asarray(Predictive(model, posterior_samples=sub)(key, **data)["y"])
+    K, J = Ymat.shape
+    S = data["S"]
+    months = np.unique(mo_k)
+    G = np.zeros((S * 12, K))
+    G[st_k * 12 + mo_k, np.arange(K)] = 1  # station-week -> site-month
+
+    def ratio(Y):  # Y: (..., K, J) -> centred log2 share, (..., S, 12, J)
+        out = np.einsum("gk,...kj->...gj", G, Y).reshape(Y.shape[:-2] + (S, 12, J))
+        lr = np.log2((out + 0.5) / (out.sum(-1, keepdims=True) + 0.5 * J))
+        return lr - lr.mean(-3, keepdims=True), out
+
+    obs, cnt = ratio(Ymat)
+    rr, _ = ratio(rep.reshape(-1, K, J))
+    keep = np.zeros((12, J), bool)
+    keep[months] = cnt.sum(0)[months] >= MIN_MONTH
+    keep = np.broadcast_to(keep, obs.shape)
+    lo, hi = np.quantile(rr, [0.05, 0.95], axis=0)
+    inside = (obs >= lo) & (obs <= hi)
+    return float(inside[keep].mean()), int(keep.sum())
 
 
 def ppc(model, key, post, y, **data):
     """90 % predictive interval coverage and zero fraction, observed vs replicated."""
-    rep = np.asarray(Predictive(model, posterior_samples=post)(key, **data)["y"])
+    rep = np.asarray(Predictive(model, posterior_samples=draws(post))(key, **data)["y"])
     lo, hi = np.quantile(rep, [0.05, 0.95], axis=0)
     return dict(ppc_cov90=float(np.mean((y >= lo) & (y <= hi))),
                 zero_obs=float(np.mean(y == 0)), zero_rep=float(np.mean(rep == 0)))
@@ -256,7 +349,8 @@ def main():
     data2 = dict(sp=sp_idx, st=st2, sw=sw_idx, mo=mo2, J=J, S=S, K=K)
     post2, diag2 = fit(m_share, k1, y=y2, **data2)
     diag2.update(ppc(m_share, k2, post2, y2, **data2))
-    u = q(post2["u"] / np.log(2))  # log2 share ratio
+    uc2 = post2["u"] - post2["u"].mean(-1, keepdims=True)  # centred across sites
+    u = q(uc2 / np.log(2))  # log2 share ratio
     rows = []
     for j in range(J):
         for s in range(S):
@@ -265,6 +359,57 @@ def main():
                          float(u[0, j, s]), float(u[1, j, s]), float(u[2, j, s])))
     write_csv(OUT / "species_share.csv",
               ["species", "station_id", "detections", "log2_share_ratio", "lo95", "hi95"], rows)
+
+    # 2b. Species composition with month-varying site effect
+    print("Fitting month-varying species composition model")
+    key, k1, k2, k3, k4 = jax.random.split(key, 5)
+    st_k = np.array([st_of[x] for x in sw_keys[:, 0]])
+    mo_k = np.array([sw_month[tuple(k)] for k in sw_keys])
+    months = np.unique(mo_k)
+    data2b = dict(data2, mi=np.searchsorted(months, mo2), M=len(months))
+    post2b, diag2b = fit(m_share_month, k1, y=y2, **data2b)
+    diag2b.update(ppc(m_share_month, k2, post2b, y2, **data2b))
+    for d, mdl, pst, kk, dd in ((diag2, m_share, post2, k3, data2),
+                                (diag2b, m_share_month, post2b, k4, data2b)):
+        d["month_share_cov90"], d["month_share_n"] = month_share_ppc(mdl, kk, pst, Y, st_k, mo_k, **dd)
+    loos = {"constant (2)": loo(m_share, post2, y=y2, **data2),
+            "month-varying (2b)": loo(m_share_month, post2b, y=y2, **data2b)}
+    cmp = az.compare(loos)
+    print(cmp)
+    mrows = []
+    for name, (d, l) in zip(loos, ((diag2, loos["constant (2)"]), (diag2b, loos["month-varying (2b)"]))):
+        mrows.append((name, float(l.elpd), float(l.se), float(l.p),
+                      float(cmp.loc[name, "elpd_diff"]), float(cmp.loc[name, "dse"]),
+                      int(np.sum(np.asarray(l.pareto_k) > 0.7)),
+                      d["ppc_cov90"], d["month_share_cov90"], d["month_share_n"]))
+    write_csv(OUT / "model_comparison.csv",
+              ["model", "elpd_loo", "se", "p_loo", "elpd_diff", "se_diff", "n_pareto_k_gt_0.7",
+               "ppc_cov90_weekly", "ppc_cov90_monthly_share", "n_monthly_share"], mrows)
+
+    ln2 = np.log(2)
+    tau2, tau2b, sv = q(post2["tau"] / ln2), q(post2b["tau"] / ln2), q(post2b["sigma_v"] / ln2)
+    sp_names = [names.get(int(t), str(t)) for t in top]
+    write_csv(OUT / "variance_components.csv",
+              ["species", "tau_model2", "lo95", "hi95", "tau_model2b", "lo95", "hi95",
+               "sigma_v", "lo95", "hi95"],
+              [(sp_names[j], *(float(x) for x in tau2[:, j]), *(float(x) for x in tau2b[:, j]),
+                *(float(x) for x in sv[:, j])) for j in range(J)])
+
+    tot_sm = post2b["u"][:, :, :, None] + post2b["v"]          # (draw, J, S, M)
+    tot_sm = (tot_sm - tot_sm.mean(2, keepdims=True)) / ln2
+    usm = q(tot_sm)
+    rows = []
+    for j in range(J):
+        for s_ in range(S):
+            for mth in months:
+                i = np.searchsorted(months, mth)
+                rows.append((sp_names[j], STATIONS[s_], MONTHS[mth],
+                             float(usm[0, j, s_, i]), float(usm[1, j, s_, i]),
+                             float(usm[2, j, s_, i]), float(u[0, j, s_])))
+    write_csv(OUT / "species_share_month.csv",
+              ["species", "station_id", "month", "log2_share_ratio", "lo95", "hi95",
+               "log2_share_ratio_model2"], rows)
+    plot_month(STATIONS, sp_names, usm, u, months, sv, tau2b)
 
     # 3. Weather response
     print("Fitting weather response model")
@@ -320,7 +465,7 @@ def main():
                "pct_per_degC", "lo95", "hi95", "pct_per_10pctRH", "rh_lo95", "rh_hi95"], rows)
 
     write_csv(OUT / "checks.csv", list(diag1.keys()),
-              [tuple(d.values()) for d in (diag1, diag2, diag3)])
+              [tuple(d.get(k, "") for k in diag1) for d in (diag1, diag2, diag2b, diag3)])
 
     raw = {"t": np.array([r[2:5] for r in rows[:S]]), "h": np.array([r[5:8] for r in rows[:S]])}
     plot(STATIONS, g, n_active, u, [names.get(int(t), str(t)) for t in top],
@@ -395,6 +540,57 @@ def plot(stations, g, n_active, u, sp_names, bslope, pooled, raw):
                loc="lower center", ncol=3, fontsize=8, frameon=False)
     fig.tight_layout(rect=(0, 0.1, 1, 1))
     fig.savefig(OUT / "weather.png", dpi=150)
+    plt.close(fig)
+
+
+def plot_month(stations, sp_names, usm, u, months, sv, tau):
+    S, J = len(stations), len(sp_names)
+    order = np.argsort(-sv[0])
+    # variance components: average site effect vs month-to-month variation
+    fig, ax = plt.subplots(figsize=(6, 0.26 * J + 1.4))
+    y = np.arange(J)
+    o = order[::-1]
+    ax.errorbar(tau[0, o], y + 0.15, xerr=[tau[0, o] - tau[1, o], tau[2, o] - tau[0, o]],
+                fmt="o", color="#0072B2", capsize=2, ms=4, label="tau: SD of average site effect")
+    ax.errorbar(sv[0, o], y - 0.15, xerr=[sv[0, o] - sv[1, o], sv[2, o] - sv[0, o]],
+                fmt="s", color="#D55E00", capsize=2, ms=4, label="sigma_v: SD of monthly deviation")
+    ax.set_yticks(y, [sp_names[i] for i in o], fontsize=8)
+    ax.set_xlabel("SD of log2 share ratio (95% CrI)")
+    ax.set_xlim(left=0)
+    ax.legend(loc="lower right", fontsize=8, frameon=False)
+    ax.set_title("Model 2b: site effect, average vs month-to-month", fontsize=10)
+    fig.tight_layout()
+    fig.savefig(OUT / "variance_components.png", dpi=150)
+    plt.close(fig)
+
+    # small multiples for species with the largest month-to-month variation
+    show = order[:N_MONTH_PANELS]
+    nc = 4
+    nr = int(np.ceil(len(show) / nc))
+    fig, axes = plt.subplots(nr, nc, figsize=(11, 2.3 * nr + 0.8), sharex=True, sharey=True)
+    x = np.arange(len(months))
+    for ax, j in zip(axes.ravel(), show):
+        for s_ in range(S):
+            c = OKABE_ITO[s_]
+            ax.fill_between(x, usm[1, j, s_], usm[2, j, s_], color=c, alpha=0.15, lw=0)
+            ax.plot(x, usm[0, j, s_], color=c, lw=1.4)
+            ax.axhline(u[0, j, s_], color=c, lw=0.9, ls="--")
+        ax.axhline(0, color="0.6", lw=0.6)
+        ax.set_title(sp_names[j], fontsize=9)
+    for ax in axes.ravel()[len(show):]:
+        ax.set_visible(False)
+    for ax in axes[-1]:
+        ax.set_xticks(x, [MONTHS[m][0] for m in months])
+    for ax in axes[:, 0]:
+        ax.set_ylabel("log2 share ratio")
+    handles = [plt.Line2D([], [], color=OKABE_ITO[s_], lw=1.6) for s_ in range(S)]
+    handles += [plt.Line2D([], [], color="0.3", ls="--", lw=0.9)]
+    fig.legend(handles, [f"PUC-{st}" for st in stations] + ["Model 2 (constant)"],
+               loc="lower center", ncol=S + 1, fontsize=8, frameon=False)
+    fig.suptitle("Species share by site and month, model 2b (lines, 95% CrI bands)"
+                 " vs model 2 (dashed)", fontsize=10)
+    fig.tight_layout(rect=(0, 0.05, 1, 0.97))
+    fig.savefig(OUT / "share_by_month.png", dpi=150)
     plt.close(fig)
 
 
