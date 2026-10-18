@@ -355,14 +355,14 @@ def plot(stations, g, n_active, u, sp_names, bslope, pooled, raw):
     sig = (u[1] > 0) | (u[2] < 0)
     order = np.argsort(med.max(1) - med.min(1))[::-1]
     lim = np.ceil(np.nanmax(np.abs(med)))
-    cmap = plt.get_cmap("PuOr_r").copy()
+    cmap = plt.get_cmap("viridis").copy()
     cmap.set_bad("0.92")
     fig, ax = plt.subplots(figsize=(6, 0.28 * J + 1.5))
     im = ax.imshow(np.ma.masked_where(~sig, med)[order], cmap=cmap, vmin=-lim, vmax=lim, aspect="auto")
     for i, j in enumerate(order):
         for s in range(S):
             ax.text(s, i, f"{med[j, s]:+.1f}", ha="center", va="center", fontsize=6,
-                    color="white" if sig[j, s] and abs(med[j, s]) > 0.6 * lim else "0.25")
+                    color="white" if sig[j, s] and med[j, s] < 0.2 * lim else "0.15")
     ax.set_xticks(range(S), [f"PUC-{l}" for l in lab], rotation=30, ha="right")
     ax.set_yticks(range(J), [sp_names[i] for i in order], fontsize=8)
     cb = fig.colorbar(im, ax=ax, shrink=0.6)
