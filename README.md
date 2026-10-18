@@ -12,6 +12,7 @@ It shows species rank over time, normalized detection counts, and daily temperat
 | `R/prepare.R` | Builds the compact browser payload (ranks, daily totals, temperature) |
 | `scripts/update_cache.R` | Refreshes the cache |
 | `scripts/seasonal.py` | Fits each shipped species' annual seasonal component (harmonic regression, block bootstrap) to `data/cache/seasonal.parquet` |
+| `scripts/site_compare.py` | NumPyro models comparing PUC sites: overall detection rate, species share, and day-to-day weather response; writes `output/site_compare/` |
 | `dashboard.qmd` | Dashboard (Observable Plot via Quarto OJS) |
 | `data/species_status.csv` | Curated residency status, note, and source DOI for the Local ecology table |
 | `data/wnv_bird_species_cdc_1999_2016.csv` | CDC list of dead-bird species with West Nile virus detected, US 1999-2016 (332 species) |
@@ -28,6 +29,12 @@ Rscript scripts/update_cache.R   # first run pulls full history; later runs fetc
 uv sync                          # installs the pinned Quarto CLI (quarto-cli on PyPI)
 uv run python scripts/seasonal.py       # seasonal component per species (about 15 s)
 uv run quarto render dashboard.qmd
+```
+
+The site comparison is a separate analysis, not part of the dashboard build:
+
+```bash
+uv run --group analysis python scripts/site_compare.py   # about 7 min on 4 CPU cores
 ```
 
 Quarto and the Python dependencies (numpy, pyarrow) are pinned in `pyproject.toml` / `uv.lock` and run through uv.

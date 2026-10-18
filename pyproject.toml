@@ -11,3 +11,9 @@ dependencies = [
 
 [tool.uv]
 package = false
+
+[dependency-groups]
+analysis = [
+    "matplotlib>=3.11.2",
+    "numpyro>=0.22.0",
+]
