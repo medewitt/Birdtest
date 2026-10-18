@@ -30,10 +30,12 @@ Season metrics, computed on every posterior draw for the average site:
                  (summer migrants) from triggering on stray detections.
                  p_censored is the share of draws whose onset falls on Jan 15,
                  i.e. the rate already met the rule when the search began.
-    departure    first day from Jan 15 to Jul 31 with E[y] <= B / 2 for K days
-                 (for winter visitors, whose rate falls in spring)
+    decline      first day from Jan 15 to Jul 31 with E[y] <= B / 2 for K days,
+                 for species with a winter population (B >= 1 per
+                 station-day). This marks the rate halving from its winter
+                 mean, not the date the last birds leave.
     presence share
-                 fraction of the log rise in E[y], from the winter mean to the
+                 (reported when P(rise >= 2x) >= 0.5) fraction of the log rise in E[y], from the winter mean to the
                  spring peak (Mar to Jul), carried by the presence part log pi
                  rather than the count part. Near 1: the species goes from
                  rarely detected to detected most days (arrival). Near 0: it
@@ -83,6 +85,7 @@ from numpyro.infer import MCMC, NUTS
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.ticker as mticker  # noqa: E402
 
 SEED = 1834
 STATIONS = [9883, 17755, 20422, 21599, 21688]
@@ -293,13 +296,17 @@ def main():
                 continue
             B = ey[:, w0:w1].mean(1, keepdims=True)
             on = first_run(ey[:, s0:s1] >= np.maximum(2 * B, FLOOR), K_PERSIST)
-            off = first_run(ey[:, s0:s1] <= B / 2, K_PERSIST)
+            # only meaningful where there is a winter population to decline
+            off = np.where(B[:, 0] >= FLOOR, first_run(ey[:, s0:s1] <= B / 2, K_PERSIST), -1)
             ok_on, ok_off = on >= 0, off >= 0
             pk = s0 + np.argmax(ey[:, s0:s1], axis=1)
             idx = np.arange(len(pk))
             rise = np.log(ey[idx, pk]) - np.log(B[:, 0])
             pres = np.log(pi[idx, pk]) - np.log(pi[:, w0:w1].mean(1))
+            p_rise = float(np.mean(rise > np.log(2)))
             share = np.where(rise > np.log(2), pres / rise, np.nan)
+            if p_rise < 0.5:  # too few draws with a doubling to summarize
+                share = np.full_like(share, np.nan)
             on_q = q(np.where(ok_on, s0 + on, np.nan))
             off_q = q(np.where(ok_off, s0 + off, np.nan))
             rows.append(dict(
@@ -308,13 +315,14 @@ def main():
                 onset=fmt_day(on_q[0]) if ok_on.mean() >= 0.5 else "",
                 onset_lo=fmt_day(on_q[1]) if ok_on.mean() >= 0.5 else "",
                 onset_hi=fmt_day(on_q[2]) if ok_on.mean() >= 0.5 else "",
-                p_departure=float(ok_off.mean()),
-                departure=fmt_day(off_q[0]) if ok_off.mean() >= 0.5 else "",
-                departure_lo=fmt_day(off_q[1]) if ok_off.mean() >= 0.5 else "",
-                departure_hi=fmt_day(off_q[2]) if ok_off.mean() >= 0.5 else "",
+                p_decline=float(ok_off.mean()),
+                decline=fmt_day(off_q[0]) if ok_off.mean() >= 0.5 else "",
+                decline_lo=fmt_day(off_q[1]) if ok_off.mean() >= 0.5 else "",
+                decline_hi=fmt_day(off_q[2]) if ok_off.mean() >= 0.5 else "",
                 winter_rate=q(B[:, 0]), peak_ratio=q(np.exp(rise)),
                 winter_presence=q(pi[:, w0:w1].mean(1)),
-                presence_share=q(share), p_share_gt_half=float(np.nanmean(share > 0.5)),
+                p_rise=p_rise, presence_share=q(share),
+                p_share_gt_half=float(np.mean(share > 0.5)) if p_rise >= 0.5 else np.nan,
                 _onset_draws=np.where(ok_on, s0 + on, -1), _rel=np.log(ey / B),
                 _peak=pk))
         curves[common] = dict(status=stat, pi=q(pi), ey=q(ey), rel={})
@@ -344,17 +352,17 @@ def main():
 
 def write_tables(rows, diag):
     cols = ["species", "status", "year", "p_onset", "p_censored", "onset", "onset_lo", "onset_hi",
-            "p_departure", "departure", "departure_lo", "departure_hi"]
+            "p_decline", "decline", "decline_lo", "decline_hi"]
     qcols = ["winter_rate", "peak_ratio", "winter_presence", "presence_share",
              "excess_over_residents"]
     with open(OUT / "onset.csv", "w") as f:
         f.write(",".join(cols + [f"{c}{s}" for c in qcols for s in ("", "_lo", "_hi")]
-                         + ["p_share_gt_half", "p_excess_gt_2"]) + "\n")
+                         + ["p_rise", "p_share_gt_half", "p_excess_gt_2"]) + "\n")
         for r in rows:
             vals = [r[c] for c in cols]
             for c in qcols:
                 vals += list(r.get(c, [np.nan] * 3))
-            vals += [r["p_share_gt_half"], r.get("p_excess_gt_2", np.nan)]
+            vals += [r["p_rise"], r["p_share_gt_half"], r.get("p_excess_gt_2", np.nan)]
             f.write(",".join(f"{v:.3g}" if isinstance(v, float) else str(v) for v in vals) + "\n")
     with open(OUT / "checks.csv", "w") as f:
         f.write("species,divergences,max_rhat,min_ess\n")
@@ -400,6 +408,8 @@ def plot(curves, rows, seasons, n_days, keys):
             a1.axvspan(dates[on[1]], dates[on[2]], color=col, alpha=0.12, lw=0)
             a1.axvline(dates[on[0]], color=col, lw=1)
         a1.set_yscale("log")
+        a1.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{v:g}"))
+        a1.yaxis.set_minor_formatter(mticker.NullFormatter())
         a1.set_title(f"{sp} ({cv['status']})", fontsize=9)
         pq_ = cv["pi"][:, lo:s1 + 30]
         a2.fill_between(x, pq_[1], pq_[2], color=col, alpha=0.25, lw=0)
@@ -430,15 +440,15 @@ def plot(curves, rows, seasons, n_days, keys):
         if r["onset"]:
             m, a, b = (np.datetime64(r[k]) for k in ("onset", "onset_lo", "onset_hi"))
             ax.errorbar(m, i, xerr=[[m - a], [b - m]], fmt="o", color=col, capsize=2, ms=4)
-        if r["departure"]:
-            m, a, b = (np.datetime64(r[k]) for k in ("departure", "departure_lo", "departure_hi"))
+        if r["decline"]:
+            m, a, b = (np.datetime64(r[k]) for k in ("decline", "decline_lo", "decline_hi"))
             ax.errorbar(m, i, xerr=[[m - a], [b - m]], fmt="v", color=col, capsize=2, ms=5,
                         mfc="white")
     ax.set_yticks(range(len(rr)),
                   [f"{r['species']}  P(onset) {r['p_onset']:.2f}" for r in rr], fontsize=7)
     handles = [plt.Line2D([], [], marker="o", color=c, ls="") for c in STATUS_COLOR.values()]
     handles += [plt.Line2D([], [], marker="v", color="0.3", mfc="white", ls="")]
-    ax.legend(handles, list(STATUS_COLOR) + ["Departure (rate halves)"], fontsize=7,
+    ax.legend(handles, list(STATUS_COLOR) + ["Decline (rate halves)"], fontsize=7,
               loc="lower right", frameon=False)
     ax.set_xlabel(f"Date in {yr} (posterior median, 95% CrI)")
     ax.set_title(f"Onset: first of {K_PERSIST} days at 2x the winter mean, {yr}", fontsize=10)
@@ -456,8 +466,9 @@ def plot(curves, rows, seasons, n_days, keys):
         ax.errorbar(wp[0], sh[0], xerr=[[wp[0] - wp[1]], [wp[2] - wp[0]]],
                     yerr=[[sh[0] - sh[1]], [sh[2] - sh[0]]], fmt="o", color=col,
                     capsize=2, ms=4, alpha=0.9)
-        ax.annotate(r["species"], (wp[0], sh[0]), fontsize=6, xytext=(3, 3),
-                    textcoords="offset points")
+        if wp[0] < 0.8 or sh[0] > 0.15 or r["species"] in FOCUS:
+            ax.annotate(r["species"], (wp[0], sh[0]), fontsize=6, xytext=(3, 3),
+                        textcoords="offset points")
     ax.axhline(0.5, color="0.6", lw=0.6, ls="--")
     ax.set_xlabel("Winter P(detected on a day), average site")
     ax.set_ylabel("Share of spring rise carried by presence")
