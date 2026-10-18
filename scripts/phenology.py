@@ -9,8 +9,10 @@ Model (hurdle negative binomial, per species j, site s, day d):
     P(y > 0)          = pi[s,d],   logit pi = g(d) + c[s]
     y - 1 | y > 0     ~ NegBin(mu, phi),  log mu = f(d) + b[s]
 
-g and f are smooth curves over calendar time: second-order random walks on
-weekly knots, linearly interpolated to days. c and b are site offsets with a
+g and f are smooth curves over calendar time: cubic B-splines with knots
+every 14 days and a second-difference penalty, fitted in mixed-model form
+(unpenalized intercept and trend plus iid random effects for the penalized
+part). c and b are site offsets with a
 sum-to-zero constraint, so g and f describe the average site (pooled with
 site offsets). The expected daily count is
 
@@ -89,13 +91,11 @@ TOP_FROM = np.datetime64("2026-01-03")  # species ranked as in site_compare.py
 N_TOP = 25
 K_PERSIST = 7
 FLOOR = 1.0         # onset also needs E[y] >= 1 detection per station-day
-KNOT = 7            # days between random-walk knots
+KNOT = 14           # days between spline knots
 CHAINS = 4
 WARMUP = int(os.environ.get("BW_WARMUP", "1000"))
 SAMPLES = int(os.environ.get("BW_SAMPLES", "1000"))
-TARGET_ACCEPT = 0.95
-KNOT_SD = 4.0       # prior SD of each knot value (logit or log scale)
-F_CENTRED = os.environ.get("BW_F_CENTRED", "0") == "1"
+TARGET_ACCEPT = 0.99
 DENSE = os.environ.get("BW_DENSE", "1") == "1"
 THIN = 4            # draws kept for derived metrics (memory)
 ONLY = os.environ.get("BW_ONLY")  # comma-separated common names, for testing
@@ -148,28 +148,16 @@ def top_species(day, spid, cnt):
 
 # --------------------------------------------------------------------- model
 
-def rw2(name, n, scale, centred):
-    """Second-order random walk on n knots. Centred (knot values sampled
-    directly, Gaussian prior on second differences) for the count curve,
-    which large daily counts inform well; non-centred (scaled increments) for
-    the presence curve, which is weakly informed when P(detected) is near 0
-    or 1 and otherwise forms a funnel with its scale."""
-    sigma = numpyro.sample(f"{name}_sigma", dist.HalfNormal(scale))
-    if centred:
-        x = numpyro.sample(f"{name}_knots", dist.Normal(0, KNOT_SD).expand([n]))
-        d2 = x[2:] - 2 * x[1:-1] + x[:-2]
-        numpyro.factor(f"{name}_rw2", dist.Normal(0, sigma).log_prob(d2).sum())
-        return x
-    lvl = numpyro.sample(f"{name}_0", dist.Normal(0, 3))
-    slope = numpyro.sample(f"{name}_slope", dist.Normal(0, 0.5))
-    z = numpyro.sample(f"{name}_z", dist.Normal(0, 1).expand([n - 2]))
-    acc = jnp.concatenate([jnp.zeros(2), jnp.cumsum(sigma * z)])
-    x = lvl + jnp.cumsum(slope + acc) - slope
-    # Weakly informative bound on each knot value. Without it the walk drifts
-    # without limit through months with no detections (complete separation),
-    # where only the random-walk prior constrains it, and chains disagree.
-    numpyro.factor(f"{name}_ridge", dist.Normal(0, KNOT_SD).log_prob(x).sum())
-    return x
+def smooth(name, X, Z):
+    """Penalized cubic B-spline in mixed-model form (as in mgcv and brms):
+    unpenalized intercept and linear trend X @ beta, plus penalized part
+    Z @ (sigma * u) with iid u ~ N(0, 1). The coefficients are close to
+    independent a priori, which keeps NUTS well conditioned even through
+    months with no detections."""
+    beta = numpyro.sample(f"{name}_beta", dist.Normal(0, jnp.array([3.0, 1.0])))
+    sigma = numpyro.sample(f"{name}_sigma", dist.HalfNormal(2.0))
+    u = numpyro.sample(f"{name}_u", dist.Normal(0, 1).expand([Z.shape[1]]))
+    return X @ beta + Z @ (sigma * u)
 
 
 def site_offsets(name, S, scale):
@@ -177,29 +165,41 @@ def site_offsets(name, S, scale):
     return numpyro.deterministic(name, raw - raw.mean())
 
 
-def hurdle(W, st, y, n_knots, S):
-    g = numpyro.deterministic("g", rw2("g", n_knots, 0.5, centred=False))
-    f = numpyro.deterministic("f", rw2("f", n_knots, 0.5, centred=F_CENTRED))
+def hurdle(X, Z, st, y, S):
+    g = smooth("g", X, Z)
+    f = smooth("f", X, Z)
     c = site_offsets("c", S, 2.0)
     b = site_offsets("b", S, 2.0)
     phi = 1 / numpyro.sample("phi_inv", dist.Exponential(1))
-    logit_pi = W @ g + c[st]
-    log_mu = W @ f + b[st]
+    logit_pi = g + c[st]
+    log_mu = f + b[st]
     nb = dist.NegativeBinomial2(jnp.exp(log_mu), phi).log_prob(jnp.maximum(y - 1, 0))
     ll = jnp.where(y == 0, jax.nn.log_sigmoid(-logit_pi), jax.nn.log_sigmoid(logit_pi) + nb)
     numpyro.factor("ll", ll.sum())
 
 
-def interp_weights(day, n_days):
-    """Sparse-as-dense linear interpolation matrix, days -> weekly knots."""
-    n_knots = n_days // KNOT + 2
-    pos = day / KNOT
-    i0 = np.floor(pos).astype(int)
-    w1 = pos - i0
-    W = np.zeros((len(day), n_knots))
-    W[np.arange(len(day)), i0] = 1 - w1
-    W[np.arange(len(day)), i0 + 1] = w1
-    return W, n_knots
+def spline_basis(n_days):
+    """Cubic B-spline basis on equally spaced knots every KNOT days, and its
+    mixed-model split for a second-difference penalty. Returns X (n_days x 2,
+    intercept and scaled day) and Z (n_days x (k - 2)) such that any spline
+    is X @ beta + Z @ v, with the penalty equal to |v|^2."""
+    t = np.arange(n_days, dtype=float)
+    k = n_days // KNOT + 4
+    h = (n_days - 1) / (k - 3)
+    knots = np.arange(-3, k + 1) * h
+    B = np.zeros((n_days, k))
+    for i in range(k):  # Cox-de Boor for cubic, uniform knots
+        x = (t - knots[i]) / h
+        B[:, i] = np.where((x >= 0) & (x < 1), x ** 3 / 6,
+                  np.where((x >= 1) & (x < 2), (-3 * x ** 3 + 12 * x ** 2 - 12 * x + 4) / 6,
+                  np.where((x >= 2) & (x < 3), (3 * x ** 3 - 24 * x ** 2 + 60 * x - 44) / 6,
+                  np.where((x >= 3) & (x < 4), (4 - x) ** 3 / 6, 0.0))))
+    D = np.diff(np.eye(k), n=2, axis=0)
+    evals, evecs = np.linalg.eigh(D.T @ D)
+    pen = evals > 1e-8
+    Z = B @ evecs[:, pen] / np.sqrt(evals[pen])
+    X = np.column_stack([np.ones(n_days), (t - t.mean()) / 365.25])
+    return X, Z
 
 
 # ------------------------------------------------------------------- metrics
@@ -226,10 +226,10 @@ def first_run(mask, k):
     return first
 
 
-def daily_curves(post, n_days):
-    Wd, _ = interp_weights(np.arange(n_days), n_days)
-    g = post["g"] @ Wd.T
-    f = post["f"] @ Wd.T
+def daily_curves(post, Xd, Zd):
+    def curve(n):
+        return post[f"{n}_beta"] @ Xd.T + (post[f"{n}_sigma"][:, None] * post[f"{n}_u"]) @ Zd.T
+    g, f = curve("g"), curve("f")
     pi = 1 / (1 + np.exp(-g))
     ey = pi * (1 + np.exp(f))
     return pi, ey
@@ -254,14 +254,15 @@ def main():
     keys, inv = np.unique(np.stack([sid, day], 1), axis=0, return_inverse=True)
     inv = inv.ravel()
     st = np.array([st_of[s] for s in keys[:, 0]])
-    W, n_knots = interp_weights(keys[:, 1], n_days)
+    Xd, Zd = spline_basis(n_days)
+    X, Z = Xd[keys[:, 1]], Zd[keys[:, 1]]
     top = top_species(day, spid, cnt)
     if ONLY:
         want = set(ONLY.split(","))
         top = [j for j in top if names[int(j)][0] in want]
     seasons = season_windows(n_days)
     key = jax.random.PRNGKey(SEED)
-    print(f"{len(keys)} active station-days, {n_days} days, {n_knots} knots")
+    print(f"{len(keys)} active station-days, {n_days} days, {Zd.shape[1] + 2} basis functions")
 
     curves, rows, diag = {}, [], []
     for j in top:
@@ -273,10 +274,10 @@ def main():
         t0 = time.time()
         mcmc = MCMC(NUTS(hurdle, target_accept_prob=TARGET_ACCEPT, dense_mass=DENSE), num_warmup=WARMUP,
                     num_samples=SAMPLES, num_chains=CHAINS, progress_bar=False)
-        mcmc.run(k1, W=W, st=st, y=y, n_knots=n_knots, S=S, extra_fields=("diverging",))
+        mcmc.run(k1, X=X, Z=Z, st=st, y=y, S=S, extra_fields=("diverging",))
         post_c = mcmc.get_samples(group_by_chain=True)
         div = int(mcmc.get_extra_fields()["diverging"].sum())
-        summ = {k: v for k, v in summary(post_c).items() if not k.endswith(("_raw", "_z"))}
+        summ = {k: v for k, v in summary(post_c).items() if not k.endswith(("_raw", "_u"))}
         rhat = max(float(np.nanmax(v["r_hat"])) for v in summ.values())
         ess = min(float(np.nanmin(v["n_eff"])) for v in summ.values())
         worst = sorted(((float(np.nanmax(v["r_hat"])), k) for k, v in summ.items()), reverse=True)[:3]
@@ -285,7 +286,7 @@ def main():
               flush=True)
         diag.append((common, div, rhat, ess))
         post = {k: np.asarray(v).reshape(-1, *v.shape[2:])[::THIN] for k, v in post_c.items()}
-        pi, ey = daily_curves(post, n_days)
+        pi, ey = daily_curves(post, Xd, Zd)
 
         for yr, w0, w1, s0, s1 in seasons:
             if not np.any((keys[:, 1] >= w0) & (keys[:, 1] < w1)):
