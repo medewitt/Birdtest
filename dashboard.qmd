@@ -697,16 +697,17 @@ htmltools::div(class = "bw-table-wrap",
 *Migratory*: present only seasonally.
 *Both*: present year-round, with migrants from farther north joining or replacing local birds in winter.
 
+Importantly, we cannot necessarily distinguish which are which per call (i.e., we do not know a particular robin call or identification is from a migratory bird or from the resident population).
+
 **Seasonality** is computed from the BirdWeather detections.
-Each bar is the species' share of all detections in that calendar month, pooled over years and scaled to its peak month, so months with more stations online do not look busier.
+Each bar is the species' share of all detections in that calendar month, pooled over years and scaled to its peak month (adjusts for reporting bias).
 Bars reflect vocal activity as well as presence: many residents sing less in late summer, and BirdNET misidentifications add low-level noise.
 
-**West Nile virus.** The mosquito icon marks species on the CDC list of dead-bird species in which West Nile virus has been detected in the United States, 1999-2016 (CDC, 2017; 332 species, kept as `data/wnv_bird_species_cdc_1999_2016.csv`).
+**West Nile virus.** The mosquito icon marks species on the CDC list of dead-bird species in which West Nile virus has been detected in the United States, [1999-2016 (CDC, 2017; 332 species)](https://www.cdc.gov/west-nile-virus/media/files/Bird_species_West_Nile_virus_U.S..pdf).
 It means the species has tested positive somewhere in the US, not that it is a major reservoir or that local birds are infected.
 `r sum(eco$wnv)` of the top `r nrow(eco)` species are on the list.
 
 **Sources.** Numbered sources are peer-reviewed papers that describe the species' migratory behavior, each linked by DOI.
-None of the six is indexed in PubMed, so no PMID links are given.
 Status for species marked "general range knowledge" follows standard range accounts and was not checked against a specific paper.
 Wikipedia links go to each species' article.
 
@@ -773,11 +774,14 @@ For the 7- and 28-day windows the total is the window length times the mean over
 Point gauges sample patchy summer thunderstorms poorly when few report, so a single day's mean has wide error; the tooltip gives the gauge count and maximum.
 Observer reports are volunteer readings and are not quality-controlled here beyond the ACIS codes.
 
-**Assumptions that can fail.** Station effort is not constant (stations join, go offline, and move).
+**Assumptions** Station effort is not constant over time (stations join, go offline, and move physically in space).
+This can lead to reporting bias across time and space.
 Detection probability varies by species, distance, and background noise, so ranks compare detectability-weighted activity, not abundance.
+This is especially important if a device is located near a roosting site.
+Detections are based on calls so these do not allow for inference on roosting per se when vocal activity is low.
 Day boundaries follow the BirdWeather API's daily bins.
 
-**Seasonal component.** For each of the shipped species, `scripts/seasonal.py` fits a quasi-Poisson log-linear regression to the daily county count, with the selected normalization as an offset (all detections for *share*, active stations for *per station-day*).
+**Seasonal component.** For each of the identified species, we fit a quasi-Poisson log-linear regression to the daily county count, with the selected normalization as an offset (all detections for *share*, active stations for *per station-day*).
 The linear predictor is an intercept, a linear trend in time, and three annual harmonic pairs (sine and cosine of 1, 2, and 3 cycles per year).
 The plotted curve is the exponentiated harmonic part divided by its mean over the year, so 1 is the species' average day and 0 is absence, with trend and effort removed.
 Bands are 95% percentile intervals from a moving-block bootstrap over days (28-day blocks, 200 resamples, seed 1834), refitting on each resample; they are shown for highlighted species.

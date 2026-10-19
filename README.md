@@ -1,6 +1,6 @@
 # Forsyth County birds dashboard
 
-Quarto dashboard of BirdWeather detections for stations in Forsyth County, NC.
+Quarto dashboard of BirdWeather detections, temperature data, and other environmental data for stations in Forsyth County, NC.
 It shows species rank over time, normalized detection counts, and daily temperature.
 
 ## Layout
@@ -16,12 +16,12 @@ It shows species rank over time, normalized detection counts, and daily temperat
 | `data/species_status.csv` | Curated residency status, note, and source DOI for the Local ecology table |
 | `data/wnv_bird_species_cdc_1999_2016.csv` | CDC list of dead-bird species with West Nile virus detected, US 1999-2016 (332 species) |
 | `assets/mosquito.png` | Icon marking WNV-listed species in the Local ecology table |
-| `assets/footer.html` | IDEAS footer, adapted from the IDEEEP site (`medewitt/ideeep`) |
-| `assets/head.html`, `assets/fonts/` | Self-hosted Nunito Sans (SIL OFL 1.1), as on the IDEEEP site |
-| `dashboard.scss` | Theme: IDEEEP colors (ink, old gold, dark navbar), phone layout, table styles |
+| `assets/footer.html` | IDEAS footer
+| `assets/head.html`, `assets/fonts/` | Self-hosted Nunito Sans (SIL OFL 1.1) as per IDEAS lab convention|
+| `dashboard.scss` | Theme: IDEAS colors (ink, old gold, dark navbar), phone layout, table styles |
 | `data/cache/` | Parquet cache |
 
-## Run
+## To Build
 
 ```bash
 Rscript scripts/update_cache.R   # first run pulls full history; later runs fetch the last 7 days
@@ -45,7 +45,7 @@ In testing, 1.1 million count rows took 1.1 MB on disk.
 PUC sensor readings (about one every 42 s) are pulled on a stratified random subsample of days, 4 local calendar days per month by default (`BW_PUC_DAYS_PER_MONTH`, `Inf` for all days).
 The sample is seeded from (1834, year, month), so it is stable across runs and shared by all stations.
 Each sampled day is pulled in full and reduced to hourly means before writing; raw readings are never stored.
-CoCoRaHS precipitation is stored as one row per gauge-day report (`cocorahs_daily.parquet`, inches as reported, with trace and accumulation codes) plus a gauge table (`cocorahs_stations.parquet`).
+[CoCoRaHS](https://www.cocorahs.org) precipitation is stored as one row per gauge-day report (`cocorahs_daily.parquet`, inches as reported, with trace and accumulation codes) plus a gauge table (`cocorahs_stations.parquet`).
 ERA5-Land hourly temperature at each PUC station's coordinates comes from the Open-Meteo archive for the same hours.
 
 Each update refetches the last 7 days per station and replaces those station-days whole, so late uploads and dropped species are handled.
@@ -53,7 +53,7 @@ Each update refetches the last 7 days per station and replaces those station-day
 ## Definitions and assumptions
 
 See the Methods page of the dashboard.
-In short, rank is the county-wide competition rank of the trailing-window detection sum.
+As per the current metholodgy, species rank is the county-wide competition rank of the trailing-window (i.e., lag) detection sum.
 Normalized count is either the share of all detections or detections per active station-day.
 Temperature and relative humidity are ERA5 daily mean, min, and max at the county centroid (Open-Meteo), with BirdWeather PUC on-board sensor daily means overlaid; PUC humidity is also shown re-expressed at outdoor (ERA5-Land) temperature, since the warm enclosure makes the sensor read dry.
 The Microclimate page compares each PUC station with ERA5-Land at its own location for air temperature, dew point, or relative humidity, with day-block bootstrap intervals, the delta by hour of day, and between-station spread compared with ERA5-Land spread.
