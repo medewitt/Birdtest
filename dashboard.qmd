@@ -42,7 +42,7 @@ viewof picked = Inputs.select(species.map(d => d.common_name), {
   label: "Highlight (up to 8)", multiple: 8,
   value: species.slice(0, 5).map(d => d.common_name)
 })
-viewof units = Inputs.radio(["°C", "°F"], { label: "Temperature", value: "°C" })
+viewof units = Inputs.radio(new Map([["°C, mm", "°C"], ["°F, in", "°F"]]), { label: "Units", value: "°C" })
 ```
 
 Drag on the strip above the charts to zoom the date range.
@@ -231,6 +231,27 @@ Plot.plot({
 ```
 
 ```{ojs}
+//| title: Precipitation
+Plot.plot({
+  className: "bw-chart",
+  marginLeft: mLeft, marginRight: mRight,
+  x: { domain: xDomain, label: null, ticks: narrow ? 4 : undefined },
+  y: { grid: true, label: `Precipitation, ${winLabel} total (${pUnits})` },
+  marks: precipRows.some(d => Number.isFinite(d.mid)) ? [
+    Plot.areaY(precipRows, { x: "date", y: "mid", fill: "#56B4E9", fillOpacity: 0.5, curve: "step" }),
+    Plot.lineY(precipRows, { x: "date", y: "mid", stroke: "#0072B2", curve: "step" }),
+    Plot.ruleY([0]),
+    keyMark([["CoCoRaHS county gauge mean", "#0072B2"]]),
+    Plot.tip(precipRows, Plot.pointerX({
+      x: "date", y: "mid",
+      title: d => `${d.date.toISOString().slice(0, 10)}\n${winLabel} total ${d3.format(pFmt)(d.mid)} ${pUnits}` +
+        (Number.isFinite(d.day) ? `\nThat day: mean ${d3.format(pFmt)(d.day)}, max ${d3.format(pFmt)(d.max)} ${pUnits}, ${d.n} gauges` : "\nNo single-day gauge reports")
+    }))
+  ] : [Plot.text(["No CoCoRaHS data in the cache. Run scripts/update_cache.R."], { frameAnchor: "middle" })]
+})
+```
+
+```{ojs}
 //| output: false
 // ---------------------------------------------------------------------------
 // Data. Payload is columnar; build typed arrays once.
@@ -401,6 +422,20 @@ function keyMark(items, anchor = "top-left") {
     fill: color, fontSize: 10, textAnchor: "start", lineAnchor: top ? "top" : "bottom",
     stroke: "white", strokeWidth: 3, paintOrder: "stroke"
   }));
+}
+
+// Precipitation: trailing w-day total, estimated as w times the mean over days
+// with any gauge report, so a day with no reports does not count as dry.
+pUnits = units === "°C" ? "mm" : "in"
+pFmt = units === "°C" ? ".1f" : ".2f"
+precipRows = {
+  const [i0, i1] = idxRange;
+  const conv = units === "°C" ? (v => v) : (v => v / 25.4);
+  const day = num(bw.daily.pcpn ?? []), mx = num(bw.daily.pcpn_max ?? []), n = num(bw.daily.pcpn_n ?? []);
+  const mid = rollMean(day, win);
+  const out = [];
+  for (let i = i0; i <= i1; i++) out.push({ date: dates[i], mid: conv(win * mid[i]), day: conv(day[i]), max: conv(mx[i]), n: n[i] });
+  return out;
 }
 
 tempRows = {
@@ -729,6 +764,14 @@ The Variable control repeats the comparison for humidity.
 *Dew point* is the cleaner humidity comparison: it depends only on the water content of the air, which enclosure heating does not change, so PUC dew point (from the sensor's own temperature and RH, inverse Magnus formula) compares directly with the ERA5-Land dew point.
 *Relative humidity* compares ERA5-Land RH with the PUC reading re-expressed at the ERA5-Land air temperature (as on the Trends page), so its delta mostly mirrors the dew point delta.
 Raw sensor RH is not compared because enclosure heating alone lowers it by roughly 14 points.
+
+**Precipitation.** Daily reports from every CoCoRaHS (Community Collaborative Rain, Hail and Snow Network) gauge in Forsyth County, from the RCC-ACIS web services (`MultiStnData`, county FIPS 37067, element `pcpn`); `r m$n_cocorahs` gauges reported over the record.
+A CoCoRaHS report is the 24 h total read at about 07:00 local time and is dated by ACIS to that morning, so it is plotted on the previous day, when 17 of its 24 hours fell.
+The county value is the mean over gauges with a single-day report, and trace counts as zero.
+Multi-day accumulated reports (weekends, travel) are dropped because they cannot be split across days, which lowers the gauge count on those days but does not bias the mean if missed days are unrelated to rainfall.
+For the 7- and 28-day windows the total is the window length times the mean over days with any report.
+Point gauges sample patchy summer thunderstorms poorly when few report, so a single day's mean has wide error; the tooltip gives the gauge count and maximum.
+Observer reports are volunteer readings and are not quality-controlled here beyond the ACIS codes.
 
 **Assumptions that can fail.** Station effort is not constant (stations join, go offline, and move).
 Detection probability varies by species, distance, and background noise, so ranks compare detectability-weighted activity, not abundance.
