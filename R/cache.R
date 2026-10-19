@@ -9,6 +9,8 @@
 #   puc_hourly.parquet         station_id, time (UTC hour), temp, humidity, n
 #   puc_days_done.parquet      station_id, date (sampled local days fetched), version
 #   era5_hourly.parquet        station_id, time, era5, era5_td (deg C), era5_rh (%), elevation; ERA5-Land
+#   cocorahs_stations.parquet  sid, name, lat, lon, elev (ft); CoCoRaHS gauges in the county (RCC-ACIS)
+#   cocorahs_daily.parquet     sid, date (observation morning), pcpn (in), trace, flag
 #
 # Detections are cached as server-side daily species counts, not raw rows.
 # A raw detection is ~21 columns of strings; a daily count is 4 integers.
@@ -321,4 +323,70 @@ update_era5_hourly <- function(stations, puc_hourly) {
   setkey(e, station_id, time)
   write_pq(e, cache_path("era5_hourly.parquet"))
   e
+}
+
+# ---------------------------------------------------------------------------
+# CoCoRaHS daily precipitation for every gauge in Forsyth County (FIPS 37067)
+# from the RCC-ACIS web services (no key). One MultiStnData call returns all
+# county stations; the full history is refetched each run because observers
+# often submit or correct reports days late.
+#
+# ACIS dates a CoCoRaHS report by its observation morning (about 07:00 local),
+# so the value for date d is the 24 h total ending on the morning of d.
+# Value codes: "T" trace, "M" missing, "S" included in a later accumulated
+# report, and an "A" suffix marks a multi-day accumulated total. Only single-day
+# reports become numbers; S and A rows keep pcpn = NA with the code in `flag`.
+# ---------------------------------------------------------------------------
+ACIS_COUNTY <- "37067"
+ACIS_COCORAHS <- "10"  # ACIS station-id type code for the CoCoRaHS network
+
+parse_acis_pcpn <- function(v) {
+  v <- trimws(as.character(v))
+  flag <- fifelse(v %chin% c("M", "S", "T"), v, fifelse(grepl("A$", v), "A", ""))
+  pcpn <- suppressWarnings(as.numeric(v))
+  pcpn[v == "T"] <- 0
+  list(pcpn = pcpn, trace = v == "T", flag = flag)
+}
+
+update_cocorahs <- function(from = HISTORY_START, to = Sys.Date()) {
+  url <- sprintf(paste0(
+    "https://data.rcc-acis.org/MultiStnData?county=%s&sdate=%s&edate=%s",
+    "&elems=pcpn&meta=name,sids,ll,elev&output=json"
+  ), ACIS_COUNTY, from, to)
+  j <- with_retry(function() jsonlite::fromJSON(url, simplifyVector = FALSE))
+  if (!is.null(j$error)) stop("ACIS: ", j$error)
+  days <- seq(as.Date(from), as.Date(to), by = "day")
+  st <- list()
+  out <- list()
+  for (s in j$data) {
+    sids <- unlist(s$meta$sids)
+    ids <- sub(" .*$", "", sids)
+    cid <- ids[sub("^.* ", "", sids) == ACIS_COCORAHS | grepl("^NC[A-Z]{2}[0-9]{4}$", ids)]
+    if (!length(cid)) next  # COOP, ASOS, and other networks
+    v <- vapply(s$data, function(x) as.character(x[[1]]), character(1))
+    p <- parse_acis_pcpn(v)
+    d <- data.table(sid = cid[1], date = days[seq_along(v)],
+                    pcpn = p$pcpn, trace = p$trace, flag = p$flag)[flag != "M"]
+    out[[length(out) + 1]] <- d
+    ll <- unlist(s$meta$ll)
+    st[[length(st) + 1]] <- data.table(
+      sid = cid[1], name = s$meta$name,
+      lon = if (length(ll) == 2) ll[1] else NA_real_,
+      lat = if (length(ll) == 2) ll[2] else NA_real_,
+      elev = if (is.null(s$meta$elev)) NA_real_ else as.numeric(s$meta$elev)
+    )
+  }
+  st <- rbindlist(st)
+  d <- rbindlist(out)
+  if (!nrow(d)) {
+    message("No CoCoRaHS reports returned by ACIS")
+    return(invisible(NULL))
+  }
+  setkey(st, sid)
+  setkey(d, sid, date)
+  write_pq(st, cache_path("cocorahs_stations.parquet"))
+  write_pq(d, cache_path("cocorahs_daily.parquet"))
+  message(sprintf("CoCoRaHS: %d gauges, %s station-day reports",
+                  nrow(st), format(nrow(d), big.mark = ",")))
+  d
 }

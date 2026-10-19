@@ -26,7 +26,8 @@ read_cache <- function() {
     weather  = rp(file.path(CACHE_DIR, "weather_era5.parquet")),
     puc      = rp(file.path(CACHE_DIR, "puc_hourly.parquet")),
     era5_h   = rp(file.path(CACHE_DIR, "era5_hourly.parquet")),
-    seasonal = rp(file.path(CACHE_DIR, "seasonal.parquet"))  # scripts/seasonal.py
+    seasonal = rp(file.path(CACHE_DIR, "seasonal.parquet")),  # scripts/seasonal.py
+    pcpn     = rp(file.path(CACHE_DIR, "cocorahs_daily.parquet"))
   )
 }
 
@@ -79,6 +80,7 @@ build_payload <- function(cache = read_cache()) {
     puc_n      = .N
   ), by = date]
   weather <- puc[weather, on = "date"]
+  weather <- precip_daily(cache$pcpn)[weather, on = "date"]
   for (v in c("rhmin", "rhmean", "rhmax")) if (!v %in% names(weather)) weather[, (v) := NA_real_]
 
   list(
@@ -89,6 +91,7 @@ build_payload <- function(cache = read_cache()) {
       n_species_total = uniqueN(cnt$species_id),
       n_stations = nrow(cache$stations),
       n_puc     = sum(cache$stations$station_type == "puc"),
+      n_cocorahs = if (is.null(cache$pcpn)) 0L else uniqueN(cache$pcpn[date >= days[1], sid]),
       data_through = format(max(days)),
       rendered  = format(Sys.time(), "%Y-%m-%d %H:%M %Z")
     ),
@@ -107,7 +110,10 @@ build_payload <- function(cache = read_cache()) {
       rhmean = round(weather$rhmean),
       rhmax  = round(weather$rhmax),
       puc_rh     = round(weather$puc_rh),
-      puc_rh_adj = round(weather$puc_rh_adj)
+      puc_rh_adj = round(weather$puc_rh_adj),
+      pcpn     = round(weather$pcpn, 1),
+      pcpn_max = round(weather$pcpn_max, 1),
+      pcpn_n   = weather$pcpn_n
     ),
     micro = build_micro(cache),
     seasonal = build_seasonal(cache$seasonal, top)
@@ -130,6 +136,21 @@ build_seasonal <- function(seas, top) {
     out[[nm]] <- list(est = round(g$est, 3), lo = round(g$lo, 3), hi = round(g$hi, 3))
   }
   out
+}
+
+# County daily precipitation (mm) from CoCoRaHS gauges: mean, max, and number
+# of gauges with a single-day report. A report dated d covers the 24 h ending
+# about 07:00 on d, so it is assigned to d - 1, the day on which most of it
+# fell. Trace counts as 0. Multi-day accumulations (S, A) are dropped because
+# they cannot be split across days. The mean of point gauges is an areal
+# estimate that undercounts patchy convective rain when few gauges report.
+precip_daily <- function(pcpn) {
+  if (is.null(pcpn) || !nrow(pcpn)) {
+    return(data.table(date = as.Date(character()), pcpn = numeric(),
+                      pcpn_max = numeric(), pcpn_n = integer()))
+  }
+  p <- pcpn[!is.na(pcpn), .(date = date - 1L, mm = 25.4 * pcpn)]
+  p[, .(pcpn = mean(mm), pcpn_max = max(mm), pcpn_n = .N), by = date]
 }
 
 # Saturation vapor pressure over water (hPa), Magnus form (Alduchov & Eskridge
