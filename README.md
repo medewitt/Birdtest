@@ -45,6 +45,7 @@ In testing, 1.1 million count rows took 1.1 MB on disk.
 PUC sensor readings (about one every 42 s) are pulled on a stratified random subsample of days, 4 local calendar days per month by default (`BW_PUC_DAYS_PER_MONTH`, `Inf` for all days).
 The sample is seeded from (1834, year, month), so it is stable across runs and shared by all stations.
 Each sampled day is pulled in full and reduced to hourly means before writing; raw readings are never stored.
+CoCoRaHS precipitation is stored as one row per gauge-day report (`cocorahs_daily.parquet`, inches as reported, with trace and accumulation codes) plus a gauge table (`cocorahs_stations.parquet`).
 ERA5-Land hourly temperature at each PUC station's coordinates comes from the Open-Meteo archive for the same hours.
 
 Each update refetches the last 7 days per station and replaces those station-days whole, so late uploads and dropped species are handled.
@@ -56,6 +57,7 @@ In short, rank is the county-wide competition rank of the trailing-window detect
 Normalized count is either the share of all detections or detections per active station-day.
 Temperature and relative humidity are ERA5 daily mean, min, and max at the county centroid (Open-Meteo), with BirdWeather PUC on-board sensor daily means overlaid; PUC humidity is also shown re-expressed at outdoor (ERA5-Land) temperature, since the warm enclosure makes the sensor read dry.
 The Microclimate page compares each PUC station with ERA5-Land at its own location for air temperature, dew point, or relative humidity, with day-block bootstrap intervals, the delta by hour of day, and between-station spread compared with ERA5-Land spread.
+Precipitation is the mean of CoCoRaHS gauge reports in the county (RCC-ACIS `MultiStnData`, FIPS 37067), each shifted to the day before its morning observation date; the full history is refetched each run because observers report late.
 Detections measure vocal activity weighted by detectability, not abundance.
 
 ## Automation
