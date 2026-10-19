@@ -1,0 +1,26 @@
+species,divergences,max_rhat,min_ess
+Carolina Wren,1,1.006,579
+Northern Cardinal,1,1.003,750
+House Finch,0,1.007,714
+Carolina Chickadee,1,1.005,713
+American Robin,0,1.001,938
+Blue Jay,0,1.002,915
+American Goldfinch,0,1.003,822
+White-throated Sparrow,11,1.009,707
+Tufted Titmouse,0,1.000,1413
+Mourning Dove,2,1.008,580
+Eastern Bluebird,0,1.012,616
+Eastern Towhee,0,1.004,852
+Common Grackle,0,1.006,1164
+Eastern Phoebe,0,1.002,822
+American Crow,0,1.007,637
+Red-bellied Woodpecker,0,1.005,658
+Fish Crow,0,1.008,229
+Cedar Waxwing,0,1.011,542
+Red-shouldered Hawk,0,1.004,1227
+White-breasted Nuthatch,0,1.002,735
+Downy Woodpecker,0,1.004,505
+Chipping Sparrow,2,1.010,557
+Chimney Swift,0,1.003,636
+Canada Goose,0,1.016,476
+Brown-headed Nuthatch,0,1.008,314
