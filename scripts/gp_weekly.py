@@ -221,8 +221,8 @@ def arrays(w, st):
 # Model
 # ---------------------------------------------------------------------------
 def matern32(d, ell):
-    # Clip r so exp(-r) never underflows to subnormal floats, which made some
-    # NUTS chains many times slower on CPU; at r = 40 the kernel is 2e-16.
+    # Clip r so exp(-r) never underflows to subnormal floats; at r = 40 the
+    # kernel is 2e-16.
     r = jnp.minimum(jnp.sqrt(3.0) * d / ell, 40.0)
     return (1.0 + r) * jnp.exp(-r)
 
