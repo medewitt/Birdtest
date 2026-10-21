@@ -1,0 +1,5 @@
+model,divergences,max_rhat,min_ess,ppc_cov90,zero_obs,zero_rep
+m_overall,0,1.001,4143,0.9526,0,0
+m_share,0,1.006,828.9,0.945,0.09962,0.0813
+m_share_month,0,1.02,118,0.9613,0.09962,0.08493
+m_weather,2,1.005,1441,0.9512,0,0
