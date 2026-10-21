@@ -116,7 +116,68 @@ build_payload <- function(cache = read_cache()) {
       pcpn_n   = weather$pcpn_n
     ),
     micro = build_micro(cache),
+    gp = build_gp(cache),
     seasonal = build_seasonal(cache$seasonal, top)
+  )
+}
+
+# Weekly GP surfaces from scripts/gp_weekly.py (rain and night temperature
+# delta), with the terrain layer from scripts/terrain.py. Rain ships as
+# integer tenths of a mm, temperature as integer hundredths of a degree C.
+# Weekly fields are week-major: row i is week i %/% n_cells, cell i %% n_cells.
+build_gp <- function(cache, terrain_file = "data/terrain.parquet", stream_km2 = 10,
+                     terrain_step = 0.005) {
+  rp <- function(f) {
+    p <- file.path(CACHE_DIR, f)
+    if (file.exists(p)) as.data.table(nanoparquet::read_parquet(p))
+  }
+  sites <- rp("gp_sites.parquet")
+  pers  <- rp("gp_persistent.parquet")
+  wk    <- rp("gp_weekly.parquet")
+  summ  <- rp("gp_summary.parquet")
+  if (is.null(sites) || is.null(pers) || is.null(wk)) return(NULL)
+  poly <- forsyth_polygon()
+  cells <- pers[var == "rain", .(cell, lon, lat, tpi = tpi_m, hand = hand_m, elev = elev_m)]
+  setorder(cells, cell)
+  streams <- terrain <- NULL
+  if (file.exists(terrain_file)) {
+    ter <- as.data.table(nanoparquet::read_parquet(terrain_file))
+    st <- ter[drain_km2 >= stream_km2 & in_polygon(lon, lat, poly$lon, poly$lat)]
+    streams <- list(lon = st$lon, lat = st$lat)
+    # Terrain map at terrain_step deg (2 x 2 blocks of the 0.0025 deg layer).
+    tm <- ter[, .(tpi = mean(tpi_m), hand = mean(hand_m, na.rm = TRUE)),
+              by = .(gx = floor(lon / terrain_step), gy = floor(lat / terrain_step))]
+    tm[, `:=`(lon = round((gx + 0.5) * terrain_step, 4), lat = round((gy + 0.5) * terrain_step, 4))]
+    tm <- tm[in_polygon(lon, lat, poly$lon, poly$lat)]
+    terrain <- list(step = terrain_step, lon = tm$lon, lat = tm$lat,
+                    tpi = round(tm$tpi, 1), hand = round(tm$hand))
+  }
+  one <- function(v, scale) {
+    s <- sites[var == v][order(est)]
+    p <- pers[var == v][order(cell)]
+    w <- wk[var == v][order(week, cell)]
+    weeks <- unique(w[, .(week, n_sites)])
+    sm <- if (is.null(summ)) NULL else summ[var == v, .(param, est = signif(est, 3), lo = signif(lo, 3), hi = signif(hi, 3))]
+    list(
+      sites = s[, .(site, name, lon, lat, n_weeks, est = round(est, 3), lo = round(lo, 3),
+                    hi = round(hi, 3), p_pos = round(p_pos, 3), distinct, privacy,
+                    tpi = tpi_m, hand = hand_m, elev = elev_m)],
+      persistent = list(est = round(p$est, 3), lo = round(p$lo, 3), hi = round(p$hi, 3),
+                        p_pos = round(p$p_pos, 3)),
+      weeks = list(day = as.integer(as.Date(weeks$week)), n_sites = weeks$n_sites),
+      weekly = list(est = as.integer(round(scale * w$est)),
+                    width = as.integer(round(scale * (w$hi - w$lo)))),
+      scale = scale,
+      summary = sm
+    )
+  }
+  list(
+    cells = cells,
+    streams = streams,
+    terrain = terrain,
+    outline = list(lon = round(poly$lon, 4), lat = round(poly$lat, 4)),
+    rain = one("rain", 10),
+    tnight = one("tnight", 100)
   )
 }
 

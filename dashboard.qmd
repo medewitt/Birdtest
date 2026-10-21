@@ -449,7 +449,7 @@ tempRows = {
 }
 ```
 
-# Microclimate
+# Microclimate {scrolling="true"}
 
 ## {.toolbar}
 
@@ -472,9 +472,7 @@ median daily spread PUC ${d3.format(".2f")(d3.median(spread.days, d => d.sdPuc))
 ${mVar.note}</p>` : html`<p class="small mb-0">${mNoData}</p>`
 ```
 
-## Column
-
-### Row {height="55%"}
+## Row {height="520px"}
 
 ```{ojs}
 //| title: "Mean delta by station (PUC minus ERA5-Land)"
@@ -509,7 +507,7 @@ mReady ? Plot.plot({
 }) : html``
 ```
 
-### Row {height="45%"}
+## Row {height="420px"}
 
 ```{ojs}
 //| title: "Delta by local hour of day (selected season)"
@@ -543,6 +541,175 @@ mReady ? Plot.plot({
     Plot.dot(spread.days, { x: "date", y: "sdEra", fill: "#0072B2", r: 2 })
   ]
 }) : html`<p>${mNoData}</p>`
+```
+
+## Row {height="660px"}
+
+### Column {width="22%"}
+
+```{ojs}
+//| title: "Weekly GP surfaces"
+viewof gpVarKey = Inputs.radio(["Rain", "Night temp"], { label: "Surface", value: "Rain" })
+viewof gpWeek = Inputs.select(gpWeekOptions, { label: "Week" })
+viewof gpLayer = Inputs.radio(["Median", "90% width"], { label: "Weekly", value: "Median" })
+viewof gpTerrainKey = Inputs.radio(["HAND", "TPI"], { label: "Terrain", value: "HAND" })
+gp ? html`<p class="small">${gpV.blurb}</p>
+<p class="small">Week starts Monday; sites reporting in parentheses. ${gpN("n_sites")} sites, ${gpN("n_weeks")} modelled weeks.
+<b>${gpSites.filter(d => d.distinct).length}</b> sites have a persistent offset whose 90% interval excludes zero (outlined).
+Correlation of site offsets with ${gpTer.short} across these ${gpN("n_sites")} sites: ${gpCor(gpTer.key)} (posterior uncertainty in the offsets only; with few sites this describes these sites, not a general relation).</p>
+<p class="small text-muted">Checks: max r-hat ${gpN("max_rhat", ".3f")}, ${gpN("divergences")} divergences,
+leave-one-site-out 90% coverage ${gpN("loo_cover90", ".2f")}.
+Controls in the page toolbar do not apply here. See Methods.</p>`
+  : html`<p class="small">No GP output in the cache. Run scripts/gp_weekly.py.</p>`
+```
+
+### Column {width="45%" .tabset}
+
+```{ojs}
+//| title: "Weekly surface"
+gp && gpWeekly ? Plot.plot({
+  className: "bw-chart",
+  projection: { type: "mercator", domain: { type: "MultiPoint", coordinates: gpOutline }, inset: 10 },
+  color: { ...(gpLayer === "Median" ? gpV.weeklyColor : { type: "linear", scheme: "cividis", label: `90% interval width (${gpV.unit})` }), legend: true },
+  marks: gpMarks({ values: gpWeekly, fmt: d3.format(".1f"), unit: gpV.unit, siteFill: "#fff" })
+}) : html`<p>No modelled week selected.</p>`
+```
+
+```{ojs}
+//| title: "Persistent difference (county-area mean = 0)"
+gp ? Plot.plot({
+  className: "bw-chart",
+  projection: { type: "mercator", domain: { type: "MultiPoint", coordinates: gpOutline }, inset: 10 },
+  color: { ...gpV.diffColor, domain: [-gpDiffMax, gpDiffMax], legend: true },
+  marks: gpMarks({ values: gpPers.map(d => d.est), opacity: gpPers.map(d => 0.2 + 0.8 * Math.abs(2 * d.p_pos - 1)),
+    fmt: gpV.fmtDiff, unit: gpV.diffUnit, siteFill: d => d.est })
+}) : html``
+```
+
+```{ojs}
+//| title: "Terrain and drainage"
+gp && gp.terrain ? Plot.plot({
+  className: "bw-chart",
+  projection: { type: "mercator", domain: { type: "MultiPoint", coordinates: gpOutline }, inset: 10 },
+  color: { ...gpTer.color, legend: true },
+  marks: gpMarks({ values: gp.terrain[gpTer.key], grid: gpTerCells, step: gp.terrain.step, fmt: d3.format(".1f"), unit: "m",
+    siteColor: { ...gpV.diffColor, domain: [-gpDiffMax, gpDiffMax] } })
+}) : html``
+```
+
+### Column {width="33%" .tabset}
+
+```{ojs}
+//| title: "Site offsets (90% interval)"
+gp ? Plot.plot({
+  className: "bw-chart",
+  marginLeft: narrow ? 110 : 150,
+  x: { label: gpV.diffLabel, grid: true },
+  y: { label: null, domain: gpSites.map(d => d.name) },
+  color: { domain: [false, true], range: ["#999", "#D55E00"] },
+  marks: [
+    Plot.ruleX([0], { stroke: "#666" }),
+    Plot.ruleY(gpSites, { y: "name", x1: "lo", x2: "hi", stroke: "distinct", strokeWidth: 2 }),
+    Plot.dot(gpSites, { y: "name", x: "est", fill: "distinct", r: 4, tip: true,
+      title: d => `${d.name}\n${gpV.fmtDiff(d.est)} ${gpV.diffUnit} [${gpV.fmtDiff(d.lo)}, ${gpV.fmtDiff(d.hi)}]\nP(above) ${d3.format(".2f")(d.p_pos)}\n${d.n_weeks} weeks\nTPI ${d.tpi} m, HAND ${d.hand} m${d.privacy ? "\nlocation fuzzed" : ""}` })
+  ]
+}) : html``
+```
+
+```{ojs}
+//| title: "Site offset vs terrain"
+gp ? Plot.plot({
+  className: "bw-chart",
+  x: { label: `${gpTer.short} (m)`, grid: true },
+  y: { label: gpV.diffLabel, grid: true },
+  color: { domain: [false, true], range: ["#999", "#D55E00"] },
+  marks: [
+    Plot.ruleY([0], { stroke: "#666" }),
+    Plot.ruleX(gpSites, { x: d => d[gpTer.site], y1: "lo", y2: "hi", stroke: "distinct" }),
+    Plot.dot(gpSites, { x: d => d[gpTer.site], y: "est", fill: "distinct", r: 4, tip: true,
+      title: d => `${d.name}\n${gpTer.short} ${d[gpTer.site]} m\noffset ${gpV.fmtDiff(d.est)} ${gpV.diffUnit}` }),
+    Plot.text([`r = ${gpCor(gpTer.key)}`], { frameAnchor: "top-right", dy: 4, dx: -4, fontSize: 11 })
+  ]
+}) : html``
+```
+
+```{ojs}
+//| output: false
+// ---------------------------------------------------------------------------
+// Weekly GP surfaces (scripts/gp_weekly.py) and terrain (scripts/terrain.py)
+// ---------------------------------------------------------------------------
+gp = bw.gp ?? null
+gpCells = gp ? transpose(gp.cells) : []
+gpStep = {
+  const u = [...new Set(gpCells.map(d => d.lon))].sort((a, b) => a - b);
+  return d3.min(d3.pairs(u), ([a, b]) => b - a) ?? 0.015;
+}
+gpOutline = gp ? gp.outline.lon.map((x, i) => [x, gp.outline.lat[i]]) : []
+gpTerCells = gp && gp.terrain ? gp.terrain.lon.map((x, i) => ({ lon: x, lat: gp.terrain.lat[i], tpi: gp.terrain.tpi[i], hand: gp.terrain.hand[i] })) : []
+gpStreams = gp && gp.streams ? gp.streams.lon.map((x, i) => ({ lon: x, lat: gp.streams.lat[i] })) : []
+
+// Rain offsets are on the log scale; show them as % of the weekly total.
+gpV = {
+  const pct = x => 100 * Math.expm1(x);
+  const v = {
+    "Rain": { key: "rain", unit: "mm", diffUnit: "%", fmtDiff: x => d3.format("+.0f")(pct(x)),
+      toDisp: pct, diffLabel: "Weekly rain vs county-area mean (%)",
+      weeklyColor: { type: "sqrt", scheme: "viridis", label: "Weekly rain, posterior median (mm)" },
+      diffColor: { type: "diverging", scheme: "BrBG", pivot: 0, label: "Persistent difference (%)" },
+      blurb: "CoCoRaHS weekly totals, wet weeks only (gauge mean at least 5 mm). Brown is persistently drier, teal wetter. Faded cells are uncertain." },
+    "Night temp": { key: "tnight", unit: "°C", diffUnit: "°C", fmtDiff: d3.format("+.2f"),
+      toDisp: x => x, diffLabel: "Night delta vs county-area mean (°C)",
+      weeklyColor: { type: "diverging", scheme: "PuOr", reverse: true, pivot: 0, label: "PUC minus ERA5-Land, 00-05 local (°C)" },
+      diffColor: { type: "diverging", scheme: "PuOr", reverse: true, pivot: 0, label: "Persistent difference (°C)" },
+      blurb: "PUC minus ERA5-Land night temperature (00-05 local), weekly mean over sampled days. The five PUC stations are clustered west of downtown with one in the southeast, so most of the county surface is prior; read the site offsets, not the map." }
+  };
+  return v[gpVarKey];
+}
+gpX = gp ? gp[gpV.key] : null
+gpSum = gpX && gpX.summary ? new Map(transpose(gpX.summary).map(d => [d.param, d])) : new Map()
+gpN = (p, f = "d") => gpSum.has(p) ? d3.format(f)(gpSum.get(p).est) : "NA"
+gpCor = k => {
+  const d = gpSum.get(`cor_${k === "tpi" ? "tpi_m" : "hand_m"}`);
+  return d ? `${d3.format("+.2f")(d.est)} [${d3.format("+.2f")(d.lo)}, ${d3.format("+.2f")(d.hi)}]` : "NA";
+}
+gpSites = gpX ? transpose(gpX.sites).map(d => ({ ...d, est: gpV.toDisp(d.est), lo: gpV.toDisp(d.lo), hi: gpV.toDisp(d.hi) })) : []
+gpPers = gpX ? gpX.persistent.est.map((e, i) => ({ est: gpV.toDisp(e), p_pos: gpX.persistent.p_pos[i] })) : []
+gpDiffMax = Math.max(d3.max(gpPers, d => Math.abs(d.est)) ?? 0, d3.max(gpSites, d => Math.abs(d.est)) ?? 0, 1e-3)
+
+gpTer = gpTerrainKey === "TPI"
+  ? { key: "tpi", site: "tpi", short: "TPI", color: { type: "diverging", scheme: "BrBG", pivot: 0, domain: [-12, 12], clamp: true, label: "TPI, elevation minus 2 km mean (m)" } }
+  : { key: "hand", site: "hand", short: "HAND", color: { type: "linear", scheme: "viridis", domain: [0, 50], clamp: true, label: "Height above nearest drainage (m)" } }
+
+gpWeekOptions = {
+  if (!gpX) return new Map([["None", -1]]);
+  const w = gpX.weeks.day.map((d, i) => [`${new Date(d * 864e5).toISOString().slice(0, 10)} (${gpX.weeks.n_sites[i]})`, i]);
+  return new Map(w.reverse());
+}
+
+gpWeekly = {
+  if (!gpX || gpWeek < 0) return null;
+  const G = gpCells.length, col = gpLayer === "Median" ? gpX.weekly.est : gpX.weekly.width;
+  return Array.from({ length: G }, (_, i) => col[gpWeek * G + i] / gpX.scale);
+}
+
+function gpMarks({ values, fmt, unit, opacity = null, siteFill, siteColor = null, grid = gpCells, step = gpStep }) {
+  const h = step / 2;
+  // Clockwise rings, as d3-geo expects for a polygon's exterior.
+  const cells = grid.map((d, i) => ({ type: "Feature", properties: { ...d, v: values[i], o: opacity ? opacity[i] : 1 },
+    geometry: { type: "Polygon", coordinates: [[[d.lon - h, d.lat - h], [d.lon - h, d.lat + h], [d.lon + h, d.lat + h], [d.lon + h, d.lat - h], [d.lon - h, d.lat - h]]] } }));
+  const siteScale = siteColor ? Plot.scale({ color: siteColor }) : null;
+  return [
+      Plot.geo(cells, { fill: d => d.properties.v, fillOpacity: d => d.properties.o, stroke: d => d.properties.v, strokeOpacity: d => d.properties.o, strokeWidth: 0.3 }),
+      Plot.tip(cells, Plot.pointer(Plot.geoCentroid({
+        title: d => `${fmt(d.properties.v)} ${unit}\nTPI ${fmt1(d.properties.tpi)} m, HAND ${d3.format(".0f")(d.properties.hand)} m` }))),
+      Plot.dot(gpStreams, { x: "lon", y: "lat", r: 1, fill: "#08306b", fillOpacity: 0.8 }),
+      Plot.line(gpOutline, { x: d => d[0], y: d => d[1], stroke: "#444" }),
+      Plot.dot(gpSites, { x: "lon", y: "lat", r: 5,
+        fill: siteScale ? (d => siteScale.apply(d.est)) : siteFill,
+        stroke: "#000", strokeWidth: d => d.distinct ? 2.5 : 0.8, tip: true,
+        title: d => `${d.name}\npersistent ${gpV.fmtDiff(d.est)} ${gpV.diffUnit} [${gpV.fmtDiff(d.lo)}, ${gpV.fmtDiff(d.hi)}]` })
+  ];
+}
 ```
 
 ```{ojs}
@@ -765,6 +932,29 @@ The Variable control repeats the comparison for humidity.
 *Dew point* is the cleaner humidity comparison: it depends only on the water content of the air, which enclosure heating does not change, so PUC dew point (from the sensor's own temperature and RH, inverse Magnus formula) compares directly with the ERA5-Land dew point.
 *Relative humidity* compares ERA5-Land RH with the PUC reading re-expressed at the ERA5-Land air temperature (as on the Trends page), so its delta mostly mirrors the dew point delta.
 Raw sensor RH is not compared because enclosure heating alone lowers it by roughly 14 points.
+
+**Weekly GP surfaces.** The lower Microclimate row interpolates two weekly variables across the county with a Gaussian process (`scripts/gp_weekly.py`, NumPyro, seed 1834).
+*Rain* is log(1 + weekly CoCoRaHS total in mm) for each gauge-week with at least 5 single-day reports (total = 7 times the daily mean), Monday to Sunday on the day the rain fell; only wet weeks (gauge mean at least 5 mm) are modelled, because gauge differences scale with the rain that falls.
+*Night temperature delta* is PUC minus ERA5-Land at 00-05 local, averaged over the sampled days in the week.
+For site s in week w, value = m0 + g(s) + u(s) + mu(w) + f_w(s) + error.
+g is a persistent spatial field and u a site offset not shared with neighbours; mu is the county level of the week and f_w a weekly anomaly field, independent across weeks, with a week-specific amplitude so that patchy storm weeks or calm clear nights can show more contrast.
+Both fields use a Matern 3/2 kernel on distance in km; the error variance is divided by the number of sampled days.
+Week levels, weekly fields and (m0, g, u) are integrated out exactly given the hyperparameters, which are sampled by NUTS (4 chains); the fields are then drawn from their Gaussian conditionals for 200 posterior draws.
+The weekly map is the posterior median of m0 + g + mu + f_w on a 0.015 degree grid, back-transformed, or the width of its 90% interval.
+The persistent map is g minus its county-area mean; for rain it is shown as the percentage difference in the weekly total, 100 (exp(g) - 1).
+A site offset is g + u at the site minus the same county-area mean; a site is outlined as distinct when its 90% interval excludes zero.
+The fit is rerun when a new complete week arrives.
+Checks shown with the panel: r-hat, divergences, and leave-one-site-out 90% predictive coverage within weeks (about 0.90 if the weekly fields and error are calibrated); the script also reports the prior predictive SD of site offsets.
+
+*Assumptions.* Errors are Gaussian on the transformed scale, weeks are independent given the hyperparameters, and the kernels are stationary and isotropic, so a ridge or valley that steers storms is not represented.
+A site offset mixes real local climate with gauge exposure and observer practice (CoCoRaHS) or sensor offset and enclosure heating (PUC), so distinct sites are hypotheses to test, not findings.
+The PUC stations are few (five with enough weeks), clustered west of downtown with one in the southeast, and share the same sampled days, so away from them the temperature surface is mostly prior and its interval is wide.
+
+**Terrain.** `scripts/terrain.py` resamples the USGS 3DEP elevation service to 3 arc-seconds (about 90 m).
+TPI (topographic position index) is elevation minus the mean within about 2 x 2 km: negative in valleys and hollows where cold air drains on clear calm nights, positive on ridges.
+Drainage area comes from D8 flow routing on the depression-filled DEM; cells draining at least 2 km^2 are taken as streams (the map draws those above 10 km^2), and HAND (height above nearest drainage) is the drop from a cell to the first stream cell downhill.
+Terrain is not in the GP, so the reported correlation over sites between offset and TPI or HAND (posterior median and 90% interval) is an independent check; cold-air pooling predicts a positive correlation of night delta with TPI and HAND.
+The interval reflects uncertainty in the site offsets only, not which sites happen to be instrumented; with five PUC stations the night correlation describes those stations and is a lead for siting new sensors, not evidence of a county-wide relation.
 
 **Precipitation.** Daily reports from every CoCoRaHS (Community Collaborative Rain, Hail and Snow Network) gauge in Forsyth County, from the RCC-ACIS web services (`MultiStnData`, county FIPS 37067, element `pcpn`); `r m$n_cocorahs` gauges reported over the record.
 A CoCoRaHS report is the 24 h total read at about 07:00 local time and is dated by ACIS to that morning, so it is plotted on the previous day, when 17 of its 24 hours fell.

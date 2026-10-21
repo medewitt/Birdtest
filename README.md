@@ -14,6 +14,9 @@ It shows species rank over time, normalized detection counts, and daily temperat
 | `scripts/seasonal.py` | Fits each shipped species' annual seasonal component (harmonic regression, block bootstrap) to `data/cache/seasonal.parquet` |
 | `scripts/site_compare.py` | NumPyro models comparing PUC sites: overall detection rate, species share (constant and month-varying site effects, compared by PSIS-LOO), and day-to-day weather response; writes `output/site_compare/` |
 | `scripts/phenology.py` | NumPyro hurdle model per species (presence and count splines, site offsets): probabilistic spring onset (7 days at 2x the winter mean) and evidence on arrival vs song; writes `output/phenology/` |
+| `scripts/terrain.py` | One-off: USGS 3DEP elevation (3 arc-second) to TPI, D8 drainage area, derived streams, and height above nearest drainage; writes `data/terrain.parquet` |
+| `scripts/gp_weekly.py` | NumPyro Gaussian process on weekly CoCoRaHS rain and PUC night temperature delta: weekly county surfaces, persistent spatial field, and per-site offsets; writes `data/cache/gp_*.parquet` |
+| `data/terrain.parquet` | Static terrain and drainage layer (0.0025 deg cells) from `scripts/terrain.py` |
 | `dashboard.qmd` | Dashboard (Observable Plot via Quarto OJS) |
 | `data/species_status.csv` | Curated residency status, note, and source DOI for the Local ecology table |
 | `data/wnv_bird_species_cdc_1999_2016.csv` | CDC list of dead-bird species with West Nile virus detected, US 1999-2016 (332 species) |
@@ -29,6 +32,7 @@ It shows species rank over time, normalized detection counts, and daily temperat
 Rscript scripts/update_cache.R   # first run pulls full history; later runs fetch the last 7 days
 uv sync                          # installs the pinned Quarto CLI (quarto-cli on PyPI)
 uv run python scripts/seasonal.py       # seasonal component per species (about 15 s)
+uv run --group analysis python scripts/gp_weekly.py   # weekly GP surfaces; skips if no new complete week
 uv run quarto render dashboard.qmd
 ```
 
@@ -66,6 +70,7 @@ As per the current metholodgy, species rank is the county-wide competition rank 
 Normalized count is either the share of all detections or detections per active station-day.
 Temperature and relative humidity are ERA5 daily mean, min, and max at the county centroid (Open-Meteo), with BirdWeather PUC on-board sensor daily means overlaid; PUC humidity is also shown re-expressed at outdoor (ERA5-Land) temperature, since the warm enclosure makes the sensor read dry.
 The Microclimate page compares each PUC station with ERA5-Land at its own location for air temperature, dew point, or relative humidity, with day-block bootstrap intervals, the delta by hour of day, and between-station spread compared with ERA5-Land spread.
+The Microclimate page also carries weekly Gaussian process surfaces for CoCoRaHS rain and PUC night temperature delta, with site offsets compared against terrain (`data/terrain.parquet`, rebuilt only by hand with `uv run --group analysis python scripts/terrain.py`).
 Precipitation is the mean of CoCoRaHS gauge reports in the county (RCC-ACIS `MultiStnData`, FIPS 37067), each shifted to the day before its morning observation date; the full history is refetched each run because observers report late.
 Detections measure vocal activity weighted by detectability, not abundance.
 
