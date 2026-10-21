@@ -477,7 +477,7 @@ ${mVar.note}</p>` : html`<p class="small mb-0">${mNoData}</p>`
 ```{ojs}
 //| title: "Mean delta by station (PUC minus ERA5-Land)"
 mReady ? Plot.plot({
-  className: "bw-chart",
+  className: "bw-map",
   projection: { type: "mercator", domain: { type: "MultiPoint", coordinates: outline }, inset: 20 },
   // Legends make the figure taller than its cell, which Quarto then grows to
   // match on phones; label the dots with their values there instead.
@@ -568,7 +568,7 @@ Controls in the page toolbar do not apply here. See Methods.</p>`
 ```{ojs}
 //| title: "Weekly surface"
 gp && gpWeekly ? Plot.plot({
-  className: "bw-chart",
+  className: "bw-map",
   projection: { type: "mercator", domain: { type: "MultiPoint", coordinates: gpOutline }, inset: 10 },
   color: { ...(gpLayer === "Median" ? gpV.weeklyColor : { type: "linear", scheme: "cividis", label: `90% interval width (${gpV.unit})` }), legend: true },
   marks: gpMarks({ values: gpWeekly, fmt: d3.format(".1f"), unit: gpV.unit, siteFill: "#fff" })
@@ -578,7 +578,7 @@ gp && gpWeekly ? Plot.plot({
 ```{ojs}
 //| title: "Persistent difference (county-area mean = 0)"
 gp ? Plot.plot({
-  className: "bw-chart",
+  className: "bw-map",
   projection: { type: "mercator", domain: { type: "MultiPoint", coordinates: gpOutline }, inset: 10 },
   color: { ...gpV.diffColor, domain: [-gpDiffMax, gpDiffMax], legend: true },
   marks: gpMarks({ values: gpPers.map(d => d.est), opacity: gpPers.map(d => 0.2 + 0.8 * Math.abs(2 * d.p_pos - 1)),
@@ -589,7 +589,7 @@ gp ? Plot.plot({
 ```{ojs}
 //| title: "Terrain and drainage"
 gp && gp.terrain ? Plot.plot({
-  className: "bw-chart",
+  className: "bw-map",
   projection: { type: "mercator", domain: { type: "MultiPoint", coordinates: gpOutline }, inset: 10 },
   color: { ...gpTer.color, legend: true },
   marks: gpMarks({ values: gp.terrain[gpTer.key], grid: gpTerCells, step: gp.terrain.step, fmt: d3.format(".1f"), unit: "m",

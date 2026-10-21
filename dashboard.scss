@@ -34,10 +34,23 @@ $web-font-path: false;
 .quarto-dashboard .toolbar form { flex-wrap: wrap; max-width: 100%; }
 
 // Phone layout. Quarto sizes OJS plots from their cell's clientHeight, which
-// is 0 on narrow screens where cards size to content, so give chart cells a floor.
+// is 0 on narrow screens where cards size to content, so give chart cells a
+// fixed height. A floor is not enough: a legend makes the figure taller than
+// the cell, the cell grows to match, and the plot is redrawn taller on every
+// resize (the URL bar hiding on scroll), so maps grew without bound.
 @media (max-width: 767.98px) {
-  .quarto-dashboard .card div[id^="ojs-cell-"]:has(svg.bw-chart) { min-height: 300px; }
+  .quarto-dashboard .card div[id^="ojs-cell-"]:has(svg.bw-chart) { height: 300px; }
   .quarto-dashboard .card div[id^="ojs-cell-"]:has(svg.bw-strip) { min-height: 64px; }
+  // Maps with a legend: taller cell, and the map shrinks (viewBox) to leave
+  // room for the legend instead of overflowing.
+  .quarto-dashboard .card div[id^="ojs-cell-"]:has(svg.bw-map) { height: 380px; }
+  .quarto-dashboard .card div[id^="ojs-cell-"] figure:has(> svg.bw-map) {
+    display: flex; flex-direction: column; height: 380px; margin: 0;
+    > svg.bw-map { flex: 1 1 0; min-height: 0; height: auto; }
+  }
+  // Stacked columns would otherwise share equal 1fr rows, so the shortest
+  // card is stretched to the height of the tallest.
+  .quarto-dashboard .bslib-grid { grid-auto-rows: auto !important; }
 
   // Compact value boxes, two per row, so the charts start on the first screen.
   .quarto-dashboard .bslib-grid:has(> .bslib-value-box) {
