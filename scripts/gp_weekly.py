@@ -96,7 +96,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from jax.scipy.linalg import cho_solve
 from numpyro.diagnostics import summary
-from numpyro.infer import MCMC, NUTS
+from numpyro.infer import MCMC, NUTS, init_to_median
 
 jax.config.update("jax_enable_x64", True)
 
@@ -381,17 +381,28 @@ def fit(name, w, st, ter, cells, key):
            for a_, l_, s_ in zip(ag, lg, su)]
     pri_sd = float(np.std(pri) * sd_y)
 
-    mcmc = MCMC(NUTS(model, target_accept_prob=0.9, max_tree_depth=8), num_warmup=WARMUP, num_samples=SAMPLES,
-                num_chains=N_CHAINS, chain_method="sequential", progress_bar=False)
-    mcmc.run(key, jnp.asarray(D), jnp.asarray(y), jnp.asarray(n), jnp.asarray(mask),
-             extra_fields=("diverging", "num_steps"))
-    ex = mcmc.get_extra_fields()
-    div = int(ex["diverging"].sum())
-    sm = summary(mcmc.get_samples(group_by_chain=True))
+    # Chains start at the prior median (eta = 0); random starts sent some
+    # chains into long warmup trees. One MCMC object per chain, so each
+    # reports its own time.
+    args = (jnp.asarray(D), jnp.asarray(y), jnp.asarray(n), jnp.asarray(mask))
+    chains, steps, div = [], [], 0
+    for ck in jax.random.split(key, N_CHAINS):
+        tc = time.time()
+        mcmc = MCMC(NUTS(model, target_accept_prob=0.9, max_tree_depth=8, init_strategy=init_to_median),
+                    num_warmup=WARMUP,
+                    num_samples=SAMPLES, num_chains=1, progress_bar=False)
+        mcmc.run(ck, *args, extra_fields=("diverging", "num_steps"))
+        ex = mcmc.get_extra_fields()
+        div += int(ex["diverging"].sum())
+        steps.append(np.asarray(ex["num_steps"]))
+        chains.append({k: np.asarray(v) for k, v in mcmc.get_samples().items()})
+        print(f"[{name}] chain {len(chains)}: {time.time() - tc:.0f} s, mean steps {steps[-1].mean():.0f}", flush=True)
+    grouped = {k: np.stack([c[k] for c in chains]) for k in chains[0]}
+    sm = summary(grouped)
     rhat = max(float(np.nanmax(v["r_hat"])) for v in sm.values())
     ess = min(float(np.nanmin(v["n_eff"])) for v in sm.values())
-    post = {k: np.asarray(v) for k, v in mcmc.get_samples().items()}
-    print(f"[{name}] NUTS {time.time() - t0:.0f} s, mean steps {np.mean(ex['num_steps']):.0f}, "
+    post = {k: v.reshape(-1, *v.shape[2:]) for k, v in grouped.items()}
+    print(f"[{name}] NUTS {time.time() - t0:.0f} s, mean steps {np.mean(steps):.0f}, "
           f"divergences {div}, max r-hat {rhat:.3f}, min ESS {ess:.0f}", flush=True)
 
     draws = rng.choice(len(post["tau"]), N_DRAWS, replace=False)
