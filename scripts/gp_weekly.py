@@ -381,7 +381,7 @@ def fit(name, w, st, ter, cells, key):
            for a_, l_, s_ in zip(ag, lg, su)]
     pri_sd = float(np.std(pri) * sd_y)
 
-    mcmc = MCMC(NUTS(model, target_accept_prob=0.9), num_warmup=WARMUP, num_samples=SAMPLES,
+    mcmc = MCMC(NUTS(model, target_accept_prob=0.9, max_tree_depth=8), num_warmup=WARMUP, num_samples=SAMPLES,
                 num_chains=N_CHAINS, chain_method="sequential", progress_bar=False)
     mcmc.run(key, jnp.asarray(D), jnp.asarray(y), jnp.asarray(n), jnp.asarray(mask),
              extra_fields=("diverging", "num_steps"))
