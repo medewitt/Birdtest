@@ -87,6 +87,14 @@ jobs:
             uv run --frozen python scripts/seasonal.py
           fi
 
+      # Refits only when a new complete week arrives or the script changes
+      # (fingerprint in data/cache/gp_key.txt); otherwise exits in seconds.
+      - name: Fit weekly GP surfaces
+        run: |
+          if [ -f data/cache/cocorahs_daily.parquet ] && [ -f data/cache/puc_hourly.parquet ]; then
+            uv run --frozen --group analysis python scripts/gp_weekly.py
+          fi
+
       - name: Push cache snapshot
         if: env.UPDATE_DATA == 'true'
         working-directory: data/cache
