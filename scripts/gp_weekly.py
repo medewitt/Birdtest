@@ -78,13 +78,18 @@ Assumptions and caveats
   the surface is mostly prior. One PUC station has location privacy on
   (fuzzed coordinates).
 
-Run: uv run --group analysis python scripts/gp_weekly.py   (about 2 min; skips if current)
+Run: uv run --group analysis python scripts/gp_weekly.py
+(10-25 min on 4 cores, mostly the rain fit; it skips in seconds when no new
+complete week has arrived, so CI pays this about once a week)
 """
 
 import hashlib
 import os
 import time
 from pathlib import Path
+
+N_CHAINS = 4
+os.environ.setdefault("XLA_FLAGS", f"--xla_force_host_platform_device_count={N_CHAINS}")
 
 import jax
 import jax.numpy as jnp
@@ -101,7 +106,6 @@ from numpyro.infer import MCMC, NUTS, init_to_median
 jax.config.update("jax_enable_x64", True)
 
 SEED = 1834
-N_CHAINS = 4
 CACHE_DIR = Path(os.environ.get("BW_CACHE_DIR", "data/cache"))
 TERRAIN = Path("data/terrain.parquet")
 TZ_LOCAL = "America/New_York"
@@ -217,7 +221,9 @@ def arrays(w, st):
 # Model
 # ---------------------------------------------------------------------------
 def matern32(d, ell):
-    r = jnp.sqrt(3.0) * d / ell
+    # Clip r so exp(-r) never underflows to subnormal floats, which made some
+    # NUTS chains many times slower on CPU; at r = 40 the kernel is 2e-16.
+    r = jnp.minimum(jnp.sqrt(3.0) * d / ell, 40.0)
     return (1.0 + r) * jnp.exp(-r)
 
 
@@ -381,27 +387,20 @@ def fit(name, w, st, ter, cells, key):
            for a_, l_, s_ in zip(ag, lg, su)]
     pri_sd = float(np.std(pri) * sd_y)
 
-    # Chains start at the prior median (eta = 0); random starts sent some
-    # chains into long warmup trees. One MCMC object per chain, so each
-    # reports its own time.
-    args = (jnp.asarray(D), jnp.asarray(y), jnp.asarray(n), jnp.asarray(mask))
-    chains, steps, div = [], [], 0
-    for ck in jax.random.split(key, N_CHAINS):
-        tc = time.time()
-        mcmc = MCMC(NUTS(model, target_accept_prob=0.9, max_tree_depth=8, init_strategy=init_to_median),
-                    num_warmup=WARMUP,
-                    num_samples=SAMPLES, num_chains=1, progress_bar=False)
-        mcmc.run(ck, *args, extra_fields=("diverging", "num_steps"))
-        ex = mcmc.get_extra_fields()
-        div += int(ex["diverging"].sum())
-        steps.append(np.asarray(ex["num_steps"]))
-        chains.append({k: np.asarray(v) for k, v in mcmc.get_samples().items()})
-        print(f"[{name}] chain {len(chains)}: {time.time() - tc:.0f} s, mean steps {steps[-1].mean():.0f}", flush=True)
-    grouped = {k: np.stack([c[k] for c in chains]) for k in chains[0]}
-    sm = summary(grouped)
+    # Chains start at the prior median (eta = 0) and run in parallel, one per
+    # CPU core.
+    mcmc = MCMC(NUTS(model, target_accept_prob=0.9, max_tree_depth=8, init_strategy=init_to_median),
+                num_warmup=WARMUP, num_samples=SAMPLES, num_chains=N_CHAINS, chain_method="parallel",
+                progress_bar=False)
+    mcmc.run(key, jnp.asarray(D), jnp.asarray(y), jnp.asarray(n), jnp.asarray(mask),
+             extra_fields=("diverging", "num_steps"))
+    ex = mcmc.get_extra_fields()
+    div = int(ex["diverging"].sum())
+    steps = np.asarray(ex["num_steps"])
+    sm = summary(mcmc.get_samples(group_by_chain=True))
     rhat = max(float(np.nanmax(v["r_hat"])) for v in sm.values())
     ess = min(float(np.nanmin(v["n_eff"])) for v in sm.values())
-    post = {k: v.reshape(-1, *v.shape[2:]) for k, v in grouped.items()}
+    post = {k: np.asarray(v) for k, v in mcmc.get_samples().items()}
     print(f"[{name}] NUTS {time.time() - t0:.0f} s, mean steps {np.mean(steps):.0f}, "
           f"divergences {div}, max r-hat {rhat:.3f}, min ESS {ess:.0f}", flush=True)
 
