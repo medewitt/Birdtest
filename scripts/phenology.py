@@ -96,9 +96,13 @@ K_PERSIST = 7
 FLOOR = 1.0         # onset also needs E[y] >= 1 detection per station-day
 KNOT = 14           # days between spline knots
 CHAINS = 4
-WARMUP = int(os.environ.get("BW_WARMUP", "1000"))
-SAMPLES = int(os.environ.get("BW_SAMPLES", "1000"))
+WARMUP = int(os.environ.get("BW_WARMUP", "2000"))
+SAMPLES = int(os.environ.get("BW_SAMPLES", "2000"))
 TARGET_ACCEPT = 0.99
+# A fit that fails any of these is rerun once with RETRY_MULT times the
+# warmup and samples; checks.csv records the final attempt.
+MAX_RHAT, MIN_ESS = 1.01, 400
+RETRY_MULT = 2
 DENSE = os.environ.get("BW_DENSE", "1") == "1"
 THIN = 4            # draws kept for derived metrics (memory)
 ONLY = os.environ.get("BW_ONLY")  # comma-separated common names, for testing
@@ -164,8 +168,8 @@ def smooth(name, X, Z):
 
 
 def site_offsets(name, S, scale):
-    raw = numpyro.sample(f"{name}_raw", dist.Normal(0, scale).expand([S]))
-    return numpyro.deterministic(name, raw - raw.mean())
+    """Sum-to-zero by construction: no unidentified mean direction for NUTS."""
+    return numpyro.sample(name, dist.ZeroSumNormal(scale, event_shape=(S,)))
 
 
 def hurdle(X, Z, st, y, S):
@@ -238,6 +242,23 @@ def daily_curves(post, Xd, Zd):
     return pi, ey
 
 
+def ppc(key, post, X, Z, st, y):
+    """Posterior predictive check on station-day counts: share of observed
+    counts inside the 90 % predictive interval, and observed vs replicated
+    share of zeros and of counts >= 10."""
+    rng = np.random.default_rng(np.asarray(key).ravel())
+    def lin(n):
+        return post[f"{n}_beta"] @ X.T + (post[f"{n}_sigma"][:, None] * post[f"{n}_u"]) @ Z.T
+    pi = 1 / (1 + np.exp(-(lin("g") + post["c"][:, st])))
+    mu = np.exp(lin("f") + post["b"][:, st])
+    phi = (1 / post["phi_inv"])[:, None]
+    nb = rng.negative_binomial(phi, phi / (phi + mu))  # NegBin2(mu, phi)
+    rep = np.where(rng.random(pi.shape) < pi, 1 + nb, 0)
+    lo, hi = np.quantile(rep, [0.05, 0.95], axis=0)
+    return (float(np.mean((y >= lo) & (y <= hi))), float(np.mean(y == 0)), float(np.mean(rep == 0)),
+            float(np.mean(y >= 10)), float(np.mean(rep >= 10)))
+
+
 def fmt_day(i):
     return str(START + np.timedelta64(int(i), "D")) if i >= 0 else ""
 
@@ -273,22 +294,27 @@ def main():
         stat = FOCUS.get(common) or status.get(sci, "Not classified")
         y = np.zeros(len(keys), np.int64)
         np.add.at(y, inv[spid == j], cnt[spid == j])
-        key, k1 = jax.random.split(key)
-        t0 = time.time()
-        mcmc = MCMC(NUTS(hurdle, target_accept_prob=TARGET_ACCEPT, dense_mass=DENSE), num_warmup=WARMUP,
-                    num_samples=SAMPLES, num_chains=CHAINS, progress_bar=False)
-        mcmc.run(k1, X=X, Z=Z, st=st, y=y, S=S, extra_fields=("diverging",))
-        post_c = mcmc.get_samples(group_by_chain=True)
-        div = int(mcmc.get_extra_fields()["diverging"].sum())
-        summ = {k: v for k, v in summary(post_c).items() if not k.endswith(("_raw", "_u"))}
-        rhat = max(float(np.nanmax(v["r_hat"])) for v in summ.values())
-        ess = min(float(np.nanmin(v["n_eff"])) for v in summ.values())
-        worst = sorted(((float(np.nanmax(v["r_hat"])), k) for k, v in summ.items()), reverse=True)[:3]
-        print(f"  {common}: divergences={div}, max r-hat={rhat:.3f}, min ESS={ess:.0f}, "
-              f"{time.time() - t0:.0f} s (worst: {', '.join(f'{k} {r:.3f}' for r, k in worst)})",
-              flush=True)
-        diag.append((common, div, rhat, ess))
-        post = {k: np.asarray(v).reshape(-1, *v.shape[2:])[::THIN] for k, v in post_c.items()}
+        for mult in (1, RETRY_MULT):
+            key, k1 = jax.random.split(key)
+            t0 = time.time()
+            mcmc = MCMC(NUTS(hurdle, target_accept_prob=TARGET_ACCEPT, dense_mass=DENSE),
+                        num_warmup=WARMUP * mult, num_samples=SAMPLES * mult, num_chains=CHAINS,
+                        progress_bar=False)
+            mcmc.run(k1, X=X, Z=Z, st=st, y=y, S=S, extra_fields=("diverging",))
+            post_c = mcmc.get_samples(group_by_chain=True)
+            div = int(mcmc.get_extra_fields()["diverging"].sum())
+            summ = {k: v for k, v in summary(post_c).items() if not k.endswith("_u")}
+            rhat = max(float(np.nanmax(v["r_hat"])) for v in summ.values())
+            ess = min(float(np.nanmin(v["n_eff"])) for v in summ.values())
+            worst = sorted(((float(np.nanmax(v["r_hat"])), k) for k, v in summ.items()), reverse=True)[:3]
+            print(f"  {common} (x{mult}): divergences={div}, max r-hat={rhat:.3f}, min ESS={ess:.0f}, "
+                  f"{time.time() - t0:.0f} s (worst: {', '.join(f'{k} {r:.3f}' for r, k in worst)})",
+                  flush=True)
+            if div == 0 and rhat <= MAX_RHAT and ess >= MIN_ESS:
+                break
+        post = {k: np.asarray(v).reshape(-1, *v.shape[2:])[::THIN * mult] for k, v in post_c.items()}
+        key, k2 = jax.random.split(key)
+        diag.append((common, mult, div, rhat, ess) + ppc(np.asarray(k2), post, X, Z, st, y))
         pi, ey = daily_curves(post, Xd, Zd)
 
         for yr, w0, w1, s0, s1 in seasons:
@@ -365,9 +391,11 @@ def write_tables(rows, diag):
             vals += [r["p_rise"], r["p_share_gt_half"], r.get("p_excess_gt_2", np.nan)]
             f.write(",".join(f"{v:.3g}" if isinstance(v, float) else str(v) for v in vals) + "\n")
     with open(OUT / "checks.csv", "w") as f:
-        f.write("species,divergences,max_rhat,min_ess\n")
+        f.write("species,length_mult,divergences,max_rhat,min_ess,"
+                "ppc_cov90,zero_obs,zero_rep,ge10_obs,ge10_rep\n")
         for d in diag:
-            f.write(f"{d[0]},{d[1]},{d[2]:.3f},{d[3]:.0f}\n")
+            f.write(f"{d[0]},{d[1]},{d[2]},{d[3]:.3f},{d[4]:.0f},"
+                    + ",".join(f"{v:.4f}" for v in d[5:]) + "\n")
 
 
 # ---------------------------------------------------------------------- plots
