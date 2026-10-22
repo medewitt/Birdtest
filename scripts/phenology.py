@@ -61,6 +61,16 @@ Assumptions and caveats
   or delay an onset.
 - Counts are conditionally independent given the curves; the random walk
   absorbs most serial correlation but not within-week bursts.
+- Species absent for months (e.g. White-throated Sparrow in summer) leave
+  both curves weakly constrained over that stretch; the fit can show a few
+  divergences at large spline SDs that longer chains and target_accept 0.999
+  do not remove (6 in 16,000 draws for White-throated Sparrow). They are
+  reported in checks.csv; treat that species' summer curves with caution.
+
+Checks (output/phenology/checks.csv): divergences, max r-hat and min ESS on
+the final attempt, and a posterior predictive check on station-day counts
+(90 % interval coverage, observed vs replicated share of zeros and of
+counts >= 10).
 
 Run: uv run --group analysis python scripts/phenology.py
 Outputs go to output/phenology/.

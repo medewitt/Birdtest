@@ -40,7 +40,7 @@ The site comparison is a separate analysis, not part of the dashboard build:
 
 ```bash
 uv run --group analysis python scripts/site_compare.py   # about 12 min on 4 CPU cores
-uv run --group analysis python scripts/phenology.py      # about 85 min on 4 CPU cores
+uv run --group analysis python scripts/phenology.py      # about 2.5-3 h on 4 CPU cores
 ```
 
 Quarto and the Python dependencies (numpy, pyarrow) are pinned in `pyproject.toml` / `uv.lock` and run through uv.
