@@ -100,9 +100,11 @@ WARMUP = int(os.environ.get("BW_WARMUP", "2000"))
 SAMPLES = int(os.environ.get("BW_SAMPLES", "2000"))
 TARGET_ACCEPT = 0.99
 # A fit that fails any of these is rerun once with RETRY_MULT times the
-# warmup and samples; checks.csv records the final attempt.
+# warmup and samples and target_accept RETRY_ACCEPT; checks.csv records the
+# final attempt.
 MAX_RHAT, MIN_ESS = 1.01, 400
 RETRY_MULT = 2
+RETRY_ACCEPT = 0.999
 DENSE = os.environ.get("BW_DENSE", "1") == "1"
 THIN = 4            # draws kept for derived metrics (memory)
 ONLY = os.environ.get("BW_ONLY")  # comma-separated common names, for testing
@@ -297,7 +299,8 @@ def main():
         for mult in (1, RETRY_MULT):
             key, k1 = jax.random.split(key)
             t0 = time.time()
-            mcmc = MCMC(NUTS(hurdle, target_accept_prob=TARGET_ACCEPT, dense_mass=DENSE),
+            accept = TARGET_ACCEPT if mult == 1 else RETRY_ACCEPT
+            mcmc = MCMC(NUTS(hurdle, target_accept_prob=accept, dense_mass=DENSE),
                         num_warmup=WARMUP * mult, num_samples=SAMPLES * mult, num_chains=CHAINS,
                         progress_bar=False)
             mcmc.run(k1, X=X, Z=Z, st=st, y=y, S=S, extra_fields=("diverging",))
