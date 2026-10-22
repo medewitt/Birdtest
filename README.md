@@ -21,8 +21,8 @@ It shows species rank over time, normalized detection counts, and daily temperat
 | `data/species_status.csv` | Curated residency status, note, and source DOI for the Local ecology table |
 | `data/wnv_bird_species_cdc_1999_2016.csv` | CDC list of dead-bird species with West Nile virus detected, US 1999-2016 (332 species) |
 | `assets/mosquito.png` | Icon marking WNV-listed species in the Local ecology table |
-| `assets/footer.html` | IDEAS footer
-| `assets/head.html`, `assets/fonts/` | Self-hosted Nunito Sans (SIL OFL 1.1) as per IDEAS lab convention|
+| `assets/footer.html` | IDEAS footer |
+| `assets/head.html`, `assets/fonts/` | Self-hosted Nunito Sans (SIL OFL 1.1) as per IDEAS lab convention |
 | `dashboard.scss` | Theme: IDEAS colors (ink, old gold, dark navbar), phone layout, table styles |
 | `data/cache/` | Parquet cache |
 
@@ -40,7 +40,7 @@ The site comparison is a separate analysis, not part of the dashboard build:
 
 ```bash
 uv run --group analysis python scripts/site_compare.py   # about 12 min on 4 CPU cores
-uv run --group analysis python scripts/phenology.py      # about 85 min on 4 CPU cores
+uv run --group analysis python scripts/phenology.py      # about 2.5-3 h on 4 CPU cores
 ```
 
 Quarto and the Python dependencies (numpy, pyarrow) are pinned in `pyproject.toml` / `uv.lock` and run through uv.
@@ -66,7 +66,7 @@ Each update refetches the last 7 days per station and replaces those station-day
 ## Definitions and assumptions
 
 See the Methods page of the dashboard.
-As per the current metholodgy, species rank is the county-wide competition rank of the trailing-window (i.e., lag) detection sum.
+As per the current methodology, species rank is the county-wide competition rank of the trailing-window (i.e., lag) detection sum.
 Normalized count is either the share of all detections or detections per active station-day.
 Temperature and relative humidity are ERA5 daily mean, min, and max at the county centroid (Open-Meteo), with BirdWeather PUC on-board sensor daily means overlaid; PUC humidity is also shown re-expressed at outdoor (ERA5-Land) temperature, since the warm enclosure makes the sensor read dry.
 The Microclimate page compares each PUC station with ERA5-Land at its own location for air temperature, dew point, or relative humidity, with day-block bootstrap intervals, the delta by hour of day, and between-station spread compared with ERA5-Land spread.
