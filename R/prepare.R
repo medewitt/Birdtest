@@ -213,7 +213,7 @@ build_aridity <- function() {
                   ai = i3(ser$ai_est), ai_lo = i3(ser$ai_lo), ai_hi = i3(ser$ai_hi),
                   def = i1(ser$def_est), def_lo = i1(ser$def_lo), def_hi = i1(ser$def_hi),
                   p = i1(ser$p_est), p_lo = i1(ser$p_lo), p_hi = i1(ser$p_hi), et0 = i1(ser$et0)),
-    summary = if (is.null(summ)) NULL else summ[, .(param, est = signif(est, 3), lo = signif(lo, 3), hi = signif(hi, 3))],
+    summary = if (is.null(summ)) NULL else summ[, .(param, est = signif(est, 6), lo = signif(lo, 3), hi = signif(hi, 3))],
     outline = list(lon = round(poly$lon, 4), lat = round(poly$lat, 4))
   )
 }

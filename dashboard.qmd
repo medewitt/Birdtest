@@ -864,7 +864,9 @@ ERA5-Land slope b ${arCI("b", ".2f")}. See Methods.</p>`
   : html``
 ```
 
-## Row {height="440px" .tabset}
+## Row {height="460px"}
+
+### Column {.tabset}
 
 ```{ojs}
 //| title: "County mean, trailing window (90% interval)"
@@ -872,7 +874,7 @@ ar ? Plot.plot({
   className: "bw-chart",
   marginLeft: 55,
   x: { label: "Window end", type: "utc" },
-  y: { label: arM.axis, grid: true, type: arM.key === "ai" ? "log" : "linear" },
+  y: { label: arM.axis, grid: true, type: arM.key === "ai" ? "log" : "linear", tickFormat: arM.tick },
   marks: [
     Plot.ruleY([arM.ref], { stroke: "#666", strokeDasharray: "4,3" }),
     Plot.areaY(arSeries, { x: "date", y1: "lo", y2: "hi", fill: "#0072B2", fillOpacity: 0.2 }),
@@ -923,10 +925,10 @@ arZero = arCI("zero_rep", ".3f")
 arM = {
   const L = { "30 days": 4, "90 days": 13, "365 days": 52 }[arWinKey];
   return arMetricKey === "AI = P / ET0"
-    ? { L, key: "ai", div: 1000, ref: 1, unit: "", fmt: d3.format(".2f"), axis: "Aridity index, P / ET0",
+    ? { L, key: "ai", div: 1000, ref: 1, unit: "", fmt: d3.format(".2f"), tick: ".2f", axis: "Aridity index, P / ET0",
         label: `AI = P / ET0, ${arWinKey}`, widthLabel: `90% interval width of AI, ${arWinKey}`,
         blurb: "AI is precipitation divided by reference evapotranspiration over the window (UNEP aridity index). Below 1 the atmosphere could evaporate more water than fell; the UNEP humid class starts at 0.65 for annual values." }
-    : { L, key: "def", div: 10, ref: 0, unit: " mm", fmt: d3.format("+.0f"), axis: "P − ET0 (mm)",
+    : { L, key: "def", div: 10, ref: 0, unit: " mm", fmt: d3.format("+.0f"), tick: ".0f", axis: "P − ET0 (mm)",
         label: `P − ET0 (mm), ${arWinKey}`, widthLabel: `90% interval width of P − ET0 (mm), ${arWinKey}`,
         blurb: "P − ET0 is the climatic water balance over the window in mm: negative values are a deficit." };
 }
@@ -948,10 +950,8 @@ arVals = {
 arGauges = arVals.filter(d => d.kind === "gauge")
 arColor = {
   const v = arVals.map(d => d.v);
-  if (arLayer !== "Median") return { type: "linear", scheme: "viridis", domain: d3.extent(v), label: arM.widthLabel };
-  return arM.key === "ai"
-    ? { type: "log", scheme: "viridis", domain: d3.extent(v), label: arM.label }
-    : { type: "linear", scheme: "viridis", domain: d3.extent(v), label: arM.label };
+  if (arLayer !== "Median") return { type: "linear", scheme: "viridis", domain: d3.extent(v), label: arM.widthLabel, tickFormat: arM.tick };
+  return { type: arM.key === "ai" ? "log" : "linear", scheme: "viridis", domain: d3.extent(v), label: arM.label, tickFormat: arM.tick, ticks: 5 };
 }
 arScale = Plot.scale({ color: arColor })
 arTip = d => `${arM.fmt(d.est)} [${arM.fmt(d.lo)}, ${arM.fmt(d.hi)}]${arM.unit}\nET0 ${d3.format(".0f")(d.et0)} mm`
