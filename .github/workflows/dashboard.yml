@@ -95,6 +95,13 @@ jobs:
             uv run --frozen --group analysis python scripts/gp_weekly.py
           fi
 
+      # Same skip rule as above (fingerprint in data/cache/aridity_key.txt).
+      - name: Fit aridity GP
+        run: |
+          if [ -f data/cache/era5_land_daily.parquet ] && [ -f data/cache/cocorahs_daily.parquet ]; then
+            uv run --frozen --group analysis python scripts/gp_aridity.py
+          fi
+
       - name: Push cache snapshot
         if: env.UPDATE_DATA == 'true'
         working-directory: data/cache

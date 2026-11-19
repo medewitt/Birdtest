@@ -14,6 +14,7 @@ It shows species rank over time, normalized detection counts, and daily temperat
 | `scripts/seasonal.py` | Fits each shipped species' annual seasonal component (harmonic regression, block bootstrap) to `data/cache/seasonal.parquet` |
 | `scripts/site_compare.py` | NumPyro models comparing PUC sites: overall detection rate, species share (constant and month-varying site effects, compared by PSIS-LOO), and day-to-day weather response; writes `output/site_compare/` |
 | `scripts/phenology.py` | NumPyro hurdle model per species (presence and count splines, site offsets): probabilistic spring onset (7 days at 2x the winter mean) and evidence on arrival vs song; writes `output/phenology/` |
+| `scripts/gp_aridity.py` | NumPyro weekly Gaussian process on CoCoRaHS precipitation with ERA5-Land precipitation as covariate, combined with ERA5-Land FAO-56 ET0: trailing 30/90/365-day aridity index (P / ET0) and P − ET0 on the county grid and at gauges; writes `data/cache/aridity_*.parquet` |
 | `scripts/terrain.py` | One-off: USGS 3DEP elevation (3 arc-second) to TPI, D8 drainage area, derived streams, and height above nearest drainage; writes `data/terrain.parquet` |
 | `scripts/gp_weekly.py` | NumPyro Gaussian process on weekly CoCoRaHS rain and PUC night temperature delta: weekly county surfaces, persistent spatial field, and per-site offsets; writes `data/cache/gp_*.parquet` |
 | `data/terrain.parquet` | Static terrain and drainage layer (0.0025 deg cells) from `scripts/terrain.py` |
@@ -33,6 +34,7 @@ Rscript scripts/update_cache.R   # first run pulls full history; later runs fetc
 uv sync                          # installs the pinned Quarto CLI (quarto-cli on PyPI)
 uv run python scripts/seasonal.py       # seasonal component per species (about 15 s)
 uv run --group analysis python scripts/gp_weekly.py   # weekly GP surfaces; skips if no new complete week
+uv run --group analysis python scripts/gp_aridity.py  # aridity GP; skips if no new complete week
 uv run quarto render dashboard.qmd
 ```
 
@@ -60,6 +62,8 @@ The sample is seeded from (1834, year, month), so it is stable across runs and s
 Each sampled day is pulled in full and reduced to hourly means before writing; raw readings are never stored.
 [CoCoRaHS](https://www.cocorahs.org) precipitation is stored as one row per gauge-day report (`cocorahs_daily.parquet`, inches as reported, with trace and accumulation codes) plus a gauge table (`cocorahs_stations.parquet`).
 ERA5-Land hourly temperature at each PUC station's coordinates comes from the Open-Meteo archive for the same hours.
+ERA5-Land hourly precipitation and FAO-56 reference evapotranspiration (ET0) are pulled from the Open-Meteo archive at every CoCoRaHS gauge and at the 0.1° ERA5-Land cell centres covering the county, summed 07:00 to 07:00 local, and stored per point-day (`era5_land_daily.parquet`, `era5_land_points.parquet`).
+The pull is incremental (last 14 days refetched); the first full pull is large enough to hit Open-Meteo's daily quota, in which case progress is saved and the next run continues.
 
 Each update refetches the last 7 days per station and replaces those station-days whole, so late uploads and dropped species are handled.
 
@@ -72,6 +76,7 @@ Temperature and relative humidity are ERA5 daily mean, min, and max at the count
 The Microclimate page compares each PUC station with ERA5-Land at its own location for air temperature, dew point, or relative humidity, with day-block bootstrap intervals, the delta by hour of day, and between-station spread compared with ERA5-Land spread.
 The Microclimate page also carries weekly Gaussian process surfaces for CoCoRaHS rain and PUC night temperature delta, with site offsets compared against terrain (`data/terrain.parquet`, rebuilt only by hand with `uv run --group analysis python scripts/terrain.py`).
 Precipitation is the mean of CoCoRaHS gauge reports in the county (RCC-ACIS `MultiStnData`, FIPS 37067), each shifted to the day before its morning observation date; the full history is refetched each run because observers report late.
+The Aridity page shows the trailing 30-, 90-, and 365-day aridity index P / ET0 and P − ET0 across the county with 90% posterior intervals; see the Methods page.
 Detections measure vocal activity weighted by detectability, not abundance.
 
 ## Automation

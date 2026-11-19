@@ -18,6 +18,12 @@ precip   <- tryCatch(update_cocorahs(), error = function(e) {
   message("CoCoRaHS update skipped: ", conditionMessage(e))
   NULL
 })
+# ERA5-Land precipitation and ET0 for the aridity GP (scripts/gp_aridity.py).
+era5_land <- tryCatch(update_era5_land(read_pq(cache_path("cocorahs_stations.parquet"))),
+                      error = function(e) {
+  message("ERA5-Land update skipped: ", conditionMessage(e))
+  NULL
+})
 
 sz <- sum(file.size(list.files(CACHE_DIR, recursive = TRUE, full.names = TRUE)))
 message(sprintf(
