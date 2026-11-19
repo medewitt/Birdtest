@@ -1129,7 +1129,7 @@ ET0 is FAO-56 Penman-Monteith reference evapotranspiration from ERA5-Land (Open-
 P comes from a weekly Gaussian process on CoCoRaHS gauges (`scripts/gp_aridity.py`, NumPyro, seed 1834).
 For gauge s and week w, sqrt(gauge total) = b sqrt(ERA5-Land total at the gauge) + m0 + g(s) + u(s) + mu(w) + f_w(s) + error, with the same persistent field, site offset, week level, weekly anomaly field, and week-specific amplitude as the Microclimate GP (Matern 3/2 kernels on distance in km).
 A gauge-week enters with at least 4 single-day reports; gauge and ERA5-Land totals are both taken over the reported days and scaled to 7, so the model describes how the gauge departs from the reanalysis on the same days, and the error variance grows as fewer days are reported.
-All weeks are modelled, dry weeks included, and weeks or places without a report fall back on the ERA5-Land covariate and neighbouring gauges.
+The last 156 complete weeks are modelled (enough for two years of 52-week windows), dry weeks included, and weeks or places without a report fall back on the ERA5-Land covariate and neighbouring gauges.
 Hyperparameters, b, and the week amplitudes are sampled by NUTS (4 chains); the fields are drawn jointly over grid cells and gauges for 200 posterior draws, and weekly P is the squared latent value (negative values set to 0).
 Window totals sum the weekly draws; the county value divides the area mean of P by the area mean of ET0.
 Maps and series show the posterior median and 90% interval.

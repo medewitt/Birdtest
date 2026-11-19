@@ -18,7 +18,9 @@ the scale sd_y of the observed y):
 A gauge-week enters with at least MIN_DAYS single-day reports. Its y and x are
 both totals over the reported days scaled to 7 days, so a missed rainy day
 lowers both and the GP models the gauge departure from ERA5-Land on the same
-days; n[s,w] = reported days / 7. Weeks with no gauge reports stay in the
+days; n[s,w] = reported days / 7. The last FIT_WEEKS complete weeks are
+fitted, enough for SHIP_WEEKS week ends of the longest window plus one; this
+bounds run time and memory. Weeks with no gauge reports stay in the
 model (the covariate and prior carry them), so rolling windows have no holes.
 Dry weeks are kept: y = 0 there, and c[w] lets those weeks have small spread.
 
@@ -89,6 +91,7 @@ SEED = gw.SEED
 CACHE_DIR = gw.CACHE_DIR
 N_CHAINS = gw.N_CHAINS
 
+FIT_WEEKS = 156      # most recent complete weeks fitted (series + longest window)
 MIN_DAYS = 4          # single-day reports per gauge-week
 MIN_WEEKS = 26        # gauge-weeks per gauge
 WINDOWS = (4, 13, 52)  # trailing weeks
@@ -124,6 +127,7 @@ def load():
     gaps = np.where(np.diff(weeks).astype("timedelta64[D]").astype(int) != 7)[0]
     if len(gaps):
         weeks = weeks[gaps[-1] + 1:]
+    weeks = weeks[-FIT_WEEKS:]
 
     # Gauge-weeks: totals over reported days, gauge and ERA5-Land on the same days.
     d = d[d.pcpn.notna()].copy()
