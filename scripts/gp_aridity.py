@@ -13,7 +13,9 @@ the scale sd_y of the observed y):
     m0, g, u, mu, f_w, e and the week scale c[w] as in scripts/gp_weekly.py:
              persistent field g (Matern 3/2), site offset u, week level mu,
              weekly anomaly field f_w with amplitude a_f c[w], error
-             e ~ N(0, (sigma c[w])^2 / n[s,w]).
+             e ~ N(0, (sigma c[w])^2 / n[s,w] + s0^2), with a fixed floor
+             s0 = 0.5 sqrt(mm), about one gauge step, so that weeks where
+             every reading is zero cannot pull c[w] to 0.
 
 A gauge-week enters with at least MIN_DAYS single-day reports. Its y and x are
 both totals over the reported days scaled to 7 days, so a missed rainy day
@@ -97,6 +99,7 @@ MIN_WEEKS = 26        # gauge-weeks per gauge
 WINDOWS = (4, 13, 52)  # trailing weeks
 SHIP_WEEKS = 104      # county series length (week ends)
 MAP_WEEKS = 13        # week ends with maps
+S0 = 0.5             # error floor, sqrt(mm): about one gauge step (0.01 in = 0.254 mm)
 CHUNK = 16            # weeks per joint draw block
 N_DRAWS = 200
 WARMUP, SAMPLES = 500, 250
@@ -193,7 +196,16 @@ def load():
 # ---------------------------------------------------------------------------
 # Model
 # ---------------------------------------------------------------------------
-def model(D, y, x, n, mask):
+def n_eff(n, p, eta, s0, xp=jnp):
+    """Error variance (sigma c[w])^2 / n + s0^2 written as (sigma c[w])^2 / n_eff,
+    so gp_weekly's covariance functions apply unchanged. The floor keeps the
+    density bounded in weeks where every gauge and ERA5-Land read zero (equal
+    residuals would otherwise let c[w] go to 0)."""
+    c = xp.exp(p["s_eta"] * eta)[:, None]
+    return 1.0 / (1.0 / n + (s0 / (p["sigma"] * c)) ** 2)
+
+
+def model(D, y, x, n, mask, s0):
     W = y.shape[0]
     p = dict(
         tau=numpyro.sample("tau", dist.HalfNormal(1.5)),
@@ -208,7 +220,7 @@ def model(D, y, x, n, mask):
     b = numpyro.sample("b", dist.Normal(1.0, 0.5))
     eta = numpyro.sample("eta", dist.Normal(0.0, 1.0).expand([W]))
     r = jnp.where(mask, y - b * x, 0.0)
-    ll, _, _ = gw.marginal(D, r, n, mask, p, eta)
+    ll, _, _ = gw.marginal(D, r, n_eff(n, p, eta, s0), mask, p, eta)
     numpyro.factor("y", ll)
 
 
@@ -280,13 +292,16 @@ def fit(a, key):
     mcmc = MCMC(NUTS(model, target_accept_prob=0.9, max_tree_depth=8, init_strategy=init_to_median),
                 num_warmup=WARMUP, num_samples=SAMPLES, num_chains=N_CHAINS, chain_method="parallel",
                 progress_bar=False)
-    mcmc.run(key, jnp.asarray(D), jnp.asarray(y), jnp.asarray(x), jnp.asarray(n), jnp.asarray(mask),
+    s0 = S0 / sd_y
+    mcmc.run(key, jnp.asarray(D), jnp.asarray(y), jnp.asarray(x), jnp.asarray(n), jnp.asarray(mask), s0,
              extra_fields=("diverging",))
     div = int(mcmc.get_extra_fields()["diverging"].sum())
     sm = summary(mcmc.get_samples(group_by_chain=True))
     rhat = max(float(np.nanmax(v["r_hat"])) for v in sm.values())
     ess = min(float(np.nanmin(v["n_eff"])) for v in sm.values())
     post = {k: np.asarray(v) for k, v in mcmc.get_samples().items()}
+    worst = sorted(((float(np.nanmax(v["r_hat"])), k) for k, v in sm.items()), reverse=True)[:3]
+    print("[aridity] worst r-hat: " + ", ".join(f"{k} {r:.3f}" for r, k in worst), flush=True)
     print(f"[aridity] NUTS {time.time() - t0:.0f} s, divergences {div}, max r-hat {rhat:.3f}, "
           f"min ESS {ess:.0f}", flush=True)
 
@@ -304,14 +319,15 @@ def fit(a, key):
         p = {h: float(post[h][i]) for h in gw.HYPER}
         b = float(post["b"][i])
         r = np.where(mask, y - b * x, 0.0)
-        v, base, f, s_w = draw(D, Dps, Dpp, r, n, mask, p, post["eta"][i], wsel, rng)
+        ne = n_eff(n, p, post["eta"][i], s0, np)
+        v, base, f, s_w = draw(D, Dps, Dpp, r, ne, mask, p, post["eta"][i], wsel, rng)
         lat = mu_y + sd_y * (b * xp[wsel] + base[None] + f)
         Pw[k] = np.clip(lat, 0, None) ** 2
         if k < 50:
-            zs.append(gw.loo_z(D, r, n, mask, p, post["eta"][i], v))
+            zs.append(gw.loo_z(D, r, ne, mask, p, post["eta"][i], v))
             # Posterior predictive at the gauges (in sample), sqrt scale.
             mk = mask[wsel]
-            sd_e = sd_y * p["sigma"] * s_w[:, None] / np.sqrt(n[wsel])
+            sd_e = sd_y * p["sigma"] * s_w[:, None] / np.sqrt(ne[wsel])
             yrep = lat[:, gidx] + sd_e * rng.standard_normal(sd_e.shape)
             zero_rep.append(np.mean(yrep[mk] <= 0))
             cover.append(yrep[mk])
