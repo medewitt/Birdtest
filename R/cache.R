@@ -11,6 +11,8 @@
 #   era5_hourly.parquet        station_id, time, era5, era5_td (deg C), era5_rh (%), elevation; ERA5-Land
 #   cocorahs_stations.parquet  sid, name, lat, lon, elev (ft); CoCoRaHS gauges in the county (RCC-ACIS)
 #   cocorahs_daily.parquet     sid, date (observation morning), pcpn (in), trace, flag
+#   era5_land_points.parquet   id, kind (gauge/cell), lon, lat, grid_lon, grid_lat, elevation, fetched_through
+#   era5_land_daily.parquet    id, date (day the rain fell, 07-07 local), pcpn_mm, et0_mm; ERA5-Land
 #
 # Detections are cached as server-side daily species counts, not raw rows.
 # A raw detection is ~21 columns of strings; a daily count is 4 integers.
@@ -389,4 +391,111 @@ update_cocorahs <- function(from = HISTORY_START, to = Sys.Date()) {
   message(sprintf("CoCoRaHS: %d gauges, %s station-day reports",
                   nrow(st), format(nrow(d), big.mark = ",")))
   d
+}
+
+# ---------------------------------------------------------------------------
+# ERA5-Land precipitation and FAO-56 reference evapotranspiration (ET0) from
+# the Open-Meteo archive, for scripts/gp_aridity.py. Points are every
+# CoCoRaHS gauge with coordinates (kind "gauge") and the ERA5-Land native
+# 0.1 deg cell centres that cover the county (kind "cell"); Open-Meteo snaps a
+# request to the nearest native cell and returns its coordinates (grid_lon,
+# grid_lat). Precipitation is not downscaled, so gauges in one cell share it;
+# ET0 uses temperature corrected to the point's elevation.
+#
+# Hourly values are the sum over the preceding hour. They are summed over
+# 07:00 to 07:00 local, the CoCoRaHS observation window, and dated to the
+# window's first day, the day the rain fell (R/prepare.R shifts CoCoRaHS
+# report dates back one day to match). A day needs at least 23 hours (DST).
+#
+# Incremental: each point keeps fetched_through and refetches the last
+# ERA5_OVERLAP days, since ERA5T values are provisional for a few days.
+# History is pulled in yearly chunks; the free API has a daily request quota
+# that a first full pull (about 6,000 weighted calls) can exceed, so on an
+# error the progress so far is saved and the next run continues.
+# ---------------------------------------------------------------------------
+ERA5_OVERLAP <- 14L
+ERA5_CHUNK <- 366L
+
+era5_land_cells <- function(step = 0.015) {
+  p <- forsyth_polygon()
+  g <- CJ(lon = seq(min(p$lon), max(p$lon) + step, by = step),
+          lat = seq(min(p$lat), max(p$lat) + step, by = step))
+  g <- g[in_polygon(lon, lat, p$lon, p$lat)]
+  unique(g[, .(lon = round(lon, 1), lat = round(lat, 1))])
+}
+
+era5_land_point_list <- function(gauges) {
+  g <- gauges[!is.na(lon) & !is.na(lat), .(id = sid, kind = "gauge", lon, lat)]
+  c <- era5_land_cells()[, .(id = sprintf("cell_%.1f_%.1f", lon, lat), kind = "cell", lon, lat)]
+  rbind(g, c)
+}
+
+fetch_era5_land <- function(lat, lon, from, to) {
+  url <- sprintf(paste0(
+    "https://archive-api.open-meteo.com/v1/archive?latitude=%.5f&longitude=%.5f",
+    "&start_date=%s&end_date=%s&models=era5_land&timezone=GMT",
+    "&hourly=precipitation,et0_fao_evapotranspiration"
+  ), lat, lon, from, to)
+  j <- with_retry(function() jsonlite::fromJSON(url), max_tries = 3)
+  if (isTRUE(j$error)) stop("Open-Meteo: ", j$reason)
+  h <- data.table(
+    time  = as.POSIXct(j$hourly$time, format = "%Y-%m-%dT%H:%M", tz = "UTC"),
+    pcpn  = as.numeric(j$hourly$precipitation),
+    et0   = as.numeric(j$hourly$et0_fao_evapotranspiration)
+  )[!is.na(pcpn) & !is.na(et0)]
+  # Hour stamped T covers (T - 1 h, T]; the 07-07 window starting on day d
+  # holds stamps 08:00 on d through 07:00 on d + 1.
+  h[, date := as.Date(time - 8 * 3600, tz = TZ_LOCAL)]
+  d <- h[, .(pcpn_mm = sum(pcpn), et0_mm = sum(et0), n = .N), by = date][n >= 23L, !"n"]
+  list(daily = d[date >= as.Date(from) & date < as.Date(to)],
+       grid_lon = j$longitude, grid_lat = j$latitude, elevation = j$elevation)
+}
+
+update_era5_land <- function(gauges, from = HISTORY_START, to = Sys.Date()) {
+  if (is.null(gauges) || !nrow(gauges)) return(invisible(NULL))
+  pts <- era5_land_point_list(gauges)
+  old_pts <- read_pq(cache_path("era5_land_points.parquet"))
+  old <- read_pq(cache_path("era5_land_daily.parquet"))
+  if (!is.null(old_pts)) {
+    pts <- old_pts[, .(id, grid_lon, grid_lat, elevation, fetched_through)][pts, on = "id"]
+  } else {
+    pts[, `:=`(grid_lon = NA_real_, grid_lat = NA_real_, elevation = NA_real_,
+               fetched_through = as.Date(NA))]
+  }
+  new <- list()
+  stop_msg <- NULL
+  for (i in seq_len(nrow(pts))) {
+    start <- if (is.na(pts$fetched_through[i])) as.Date(from) else pts$fetched_through[i] - ERA5_OVERLAP
+    while (is.null(stop_msg) && start < to) {
+      end <- min(start + ERA5_CHUNK - 1L, as.Date(to))
+      # The window starting on `end` closes at 07:00 the next day, so request one more day.
+      r <- tryCatch(fetch_era5_land(pts$lat[i], pts$lon[i], start, end + 1L), error = function(e) e)
+      if (inherits(r, "error")) {
+        stop_msg <- conditionMessage(r)
+        break
+      }
+      Sys.sleep(0.5)
+      if (nrow(r$daily)) {
+        new[[length(new) + 1]] <- r$daily[, id := pts$id[i]]
+        pts[i, `:=`(grid_lon = r$grid_lon, grid_lat = r$grid_lat, elevation = r$elevation,
+                    fetched_through = max(r$daily$date))]
+      }
+      start <- end + 1L
+    }
+    if (!is.null(stop_msg)) break
+  }
+  d <- rbindlist(c(list(old), new), use.names = TRUE)
+  if (nrow(d)) {
+    # Later pulls replace earlier values for the same point-day.
+    d <- unique(d[nrow(d):1], by = c("id", "date"))[id %chin% pts$id]
+    setkey(d, id, date)
+    write_pq(d[, .(id, date, pcpn_mm, et0_mm)], cache_path("era5_land_daily.parquet"))
+  }
+  write_pq(pts[, .(id, kind, lon, lat, grid_lon, grid_lat, elevation, fetched_through)],
+           cache_path("era5_land_points.parquet"))
+  if (!is.null(stop_msg)) message("ERA5-Land pull stopped early (continues next run): ", stop_msg)
+  ft <- pts$fetched_through
+  message(sprintf("ERA5-Land: %d points, %d with data, all through %s", nrow(pts), sum(!is.na(ft)),
+                  if (anyNA(ft)) "(incomplete)" else format(min(ft))))
+  invisible(d)
 }

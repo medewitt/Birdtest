@@ -117,6 +117,7 @@ build_payload <- function(cache = read_cache()) {
     ),
     micro = build_micro(cache),
     gp = build_gp(cache),
+    aridity = build_aridity(),
     seasonal = build_seasonal(cache$seasonal, top)
   )
 }
@@ -178,6 +179,42 @@ build_gp <- function(cache, terrain_file = "data/terrain.parquet", stream_km2 = 
     outline = list(lon = round(poly$lon, 4), lat = round(poly$lat, 4)),
     rain = one("rain", 10),
     tnight = one("tnight", 100)
+  )
+}
+
+# Aridity from scripts/gp_aridity.py: AI = P / ET0 ships as integer
+# thousandths, P - ET0, P and ET0 as integer tenths of a mm. Map columns are
+# ordered window, week end, point (points as in `points`, cells then gauges).
+build_aridity <- function() {
+  rp <- function(f) {
+    p <- file.path(CACHE_DIR, f)
+    if (file.exists(p)) as.data.table(nanoparquet::read_parquet(p))
+  }
+  pts  <- rp("aridity_points.parquet")
+  mp   <- rp("aridity_map.parquet")
+  ser  <- rp("aridity_series.parquet")
+  summ <- rp("aridity_summary.parquet")
+  if (is.null(pts) || is.null(mp) || is.null(ser)) return(NULL)
+  pts[, idx := .I - 1L]
+  mp <- pts[, .(point, idx)][mp, on = "point"]
+  setorder(mp, window, week_end, idx)
+  setorder(ser, window, week_end)
+  i3 <- function(x) as.integer(round(1000 * x))
+  i1 <- function(x) as.integer(round(10 * x))
+  poly <- forsyth_polygon()
+  list(
+    windows = sort(unique(ser$window)),
+    points = pts[, .(kind, point, name, lon, lat, n_weeks, weeks_4, weeks_13, weeks_52)],
+    map_weeks = as.integer(sort(unique(as.Date(mp$week_end)))),
+    map = list(ai = i3(mp$ai_est), ai_lo = i3(mp$ai_lo), ai_hi = i3(mp$ai_hi),
+               def = i1(mp$def_est), def_lo = i1(mp$def_lo), def_hi = i1(mp$def_hi),
+               et0 = i1(mp$et0)),
+    series = list(window = ser$window, day = as.integer(as.Date(ser$week_end)),
+                  ai = i3(ser$ai_est), ai_lo = i3(ser$ai_lo), ai_hi = i3(ser$ai_hi),
+                  def = i1(ser$def_est), def_lo = i1(ser$def_lo), def_hi = i1(ser$def_hi),
+                  p = i1(ser$p_est), p_lo = i1(ser$p_lo), p_hi = i1(ser$p_hi), et0 = i1(ser$et0)),
+    summary = if (is.null(summ)) NULL else summ[, .(param, est = signif(est, 6), lo = signif(lo, 3), hi = signif(hi, 3))],
+    outline = list(lon = round(poly$lon, 4), lat = round(poly$lat, 4))
   )
 }
 
